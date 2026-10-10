@@ -92,6 +92,7 @@ export interface Atendimento {
   // Checklist de qualificação
   qualif_atividade: string | null;
   qualif_outras_empresas: boolean | null;
+  qualif_outras_empresas_obs: string | null;
   qualif_funcionarios: number | null;
   qualif_faturamento_mensal: number | null;
   qualif_contabilidade_anterior: string | null;

@@ -66,6 +66,11 @@ export function EtapaDetalhe({
         <Info label="Possui outras empresas">
           {a.qualif_outras_empresas === null ? "" : a.qualif_outras_empresas ? "Sim" : "Não"}
         </Info>
+        {a.qualif_outras_empresas && a.qualif_outras_empresas_obs && (
+          <Info label="Sobre as outras empresas" className="col-span-2 sm:col-span-3">
+            <span className="whitespace-pre-line">{a.qualif_outras_empresas_obs}</span>
+          </Info>
+        )}
         <Info label="Nº de funcionários">{a.qualif_funcionarios === null ? "" : String(a.qualif_funcionarios)}</Info>
         <Info label="Faturamento mensal">
           {a.qualif_faturamento_mensal === null ? "" : formatBRL(a.qualif_faturamento_mensal)}

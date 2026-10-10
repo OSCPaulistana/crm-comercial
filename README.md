@@ -23,7 +23,7 @@ As permissões são aplicadas em **duas camadas**: no servidor (cada página val
 - **Declínio**: exige ao menos um motivo (Honorários, Trava contratual com a contabilidade atual, Outro). "Outro" exige descrição.
 - **Esteira (linha do tempo)**: o atendimento mostra a trilha com as 6 etapas do funil (declínio em vermelho). **Clique em uma etapa já alcançada** para ver, em modo leitura, o que foi preenchido nela (checklist, visita, proposta, fechamento, motivos) e os registros feitos. A etapa muda **por botões diretos**: *Concluir etapa e avançar*, *Declinar negócio* e *Mover para outra etapa*. Cada um grava na hora. Se a etapa de destino exige algum dado (data da visita, proposta, motivos…), abre uma janela pedindo só isso. A tela permanece aberta mostrando a nova etapa. O botão **Salvar** do rodapé só registra dados e observações, **sem mudar a etapa**. O sistema só confirma a gravação quando o banco confirma a linha alterada.
 - **Meio do primeiro contato**: WhatsApp, Ligação, E-mail ou Presencial. É informado **só no registro do lead**, e o gráfico "Meio do primeiro contato" do dashboard conta os atendimentos por esse meio.
-- **Checklist de Qualificação** (7 itens, todos obrigatórios): atividade, possui outras empresas, nº de funcionários, faturamento mensal, contabilidade anterior, principal dor hoje e produtos/serviços negociados. Pode ser salvo aos poucos enquanto o lead está em Qualificação, mas **só é possível avançar para Agendado Visita (ou etapas seguintes) com o checklist completo**. A regra também vale no banco de dados. Declinar continua permitido a qualquer momento.
+- **Checklist de Qualificação** (7 itens, todos obrigatórios; se *possui outras empresas* for **Sim**, abre um campo opcional de observações): atividade, possui outras empresas, nº de funcionários, faturamento mensal, contabilidade anterior, principal dor hoje e produtos/serviços negociados. Pode ser salvo aos poucos enquanto o lead está em Qualificação, mas **só é possível avançar para Agendado Visita (ou etapas seguintes) com o checklist completo**. A regra também vale no banco de dados. Declinar continua permitido a qualquer momento.
 - **Visita realizada**: informa-se se foi *Visita* ou *Reunião no escritório* (obrigatório nessa etapa).
 - **Registros por etapa**: cada etapa pode ter **vários registros** (observação + anexos), por exemplo várias ligações até agendar a visita. Anexos: imagens, PDF, áudio/vídeo do WhatsApp (MP4, M4A, OPUS, MP3), até 25 MB cada e 10 por registro, no Storage privado (bucket `anexos`) com links temporários. Para adicionar outro registro na mesma etapa, use "Continuar nesta etapa". Registros podem ser excluídos pelo autor ou por gestores.
 - **Proposta enviada**: exige os **serviços/pacotes propostos (múltipla escolha — pode ser mais de um)** e o **valor total proposto**. As propostas em aberto formam a **projeção de faturamento** do dashboard.
@@ -53,7 +53,8 @@ No Supabase, abra **SQL Editor** e execute, nesta ordem:
 7. `supabase/migrations/20260928000007_registros_anexos.sql` (cria também o bucket `anexos` no Storage)
 8. `supabase/migrations/20261010000008_checklist_visita_meio_inicial.sql`
 9. `supabase/migrations/20261013000009_proposta_varios_servicos.sql`
-10. *(opcional)* `supabase/seed-demo.sql` — cria produtos, 2 vendedores, metas e 120 atendimentos fictícios para você validar o dashboard. No fim do arquivo há o SQL para removê-los.
+10. `supabase/migrations/20261014000010_qualif_outras_empresas_obs.sql`
+11. *(opcional)* `supabase/seed-demo.sql` — cria produtos, 2 vendedores, metas e 120 atendimentos fictícios para você validar o dashboard. No fim do arquivo há o SQL para removê-los.
 
 > Com a Supabase CLI, você também pode usar `supabase link` + `supabase db push`.
 

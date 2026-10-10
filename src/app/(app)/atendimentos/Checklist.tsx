@@ -10,6 +10,8 @@ import type { Atendimento, Produto } from "@/types/database";
 export interface ChecklistValores {
   q_atividade: string;
   q_outras: "" | "sim" | "nao";
+  /** Informações adicionais (opcional) — só quando possui outras empresas. */
+  q_outras_obs: string;
   q_funcionarios: string;
   q_faturamento: string;
   q_contabilidade: string;
@@ -22,6 +24,7 @@ export type ChecklistErros = Partial<Record<keyof ChecklistValores, string>>;
 export const CHECKLIST_VAZIO: ChecklistValores = {
   q_atividade: "",
   q_outras: "",
+  q_outras_obs: "",
   q_funcionarios: "",
   q_faturamento: "",
   q_contabilidade: "",
@@ -34,6 +37,7 @@ export function checklistDe(a: Atendimento | null): ChecklistValores {
   return {
     q_atividade: a.qualif_atividade ?? "",
     q_outras: a.qualif_outras_empresas === true ? "sim" : a.qualif_outras_empresas === false ? "nao" : "",
+    q_outras_obs: a.qualif_outras_empresas_obs ?? "",
     q_funcionarios: a.qualif_funcionarios === null ? "" : String(a.qualif_funcionarios),
     q_faturamento:
       a.qualif_faturamento_mensal === null
@@ -63,6 +67,7 @@ export const CHECKLIST_TOTAL = 7;
 const MSG: Record<keyof ChecklistValores, string> = {
   q_atividade: "Informe a atividade.",
   q_outras: "Informe se possui outras empresas.",
+  q_outras_obs: "", // opcional: nunca é pendência
   q_funcionarios: "Informe o número de funcionários.",
   q_faturamento: "Informe o faturamento mensal.",
   q_contabilidade: "Informe a contabilidade anterior.",
@@ -80,6 +85,8 @@ export function checklistParaBanco(v: ChecklistValores) {
   return {
     qualif_atividade: v.q_atividade.trim() || null,
     qualif_outras_empresas: v.q_outras === "" ? null : v.q_outras === "sim",
+    // a observação só vale quando possui outras empresas
+    qualif_outras_empresas_obs: v.q_outras === "sim" ? v.q_outras_obs.trim() || null : null,
     qualif_funcionarios: v.q_funcionarios === "" ? null : Number(v.q_funcionarios),
     qualif_faturamento_mensal: v.q_faturamento === "" ? null : parseMoney(v.q_faturamento),
     qualif_contabilidade_anterior: v.q_contabilidade.trim() || null,
@@ -151,6 +158,17 @@ export function Checklist({
           error={erros.q_outras}
           wrapperClassName="sm:col-span-2"
         />
+        {valores.q_outras === "sim" && (
+          <Textarea
+            label="Informações sobre as outras empresas"
+            value={valores.q_outras_obs}
+            onChange={(e) => onChange({ q_outras_obs: e.target.value })}
+            rows={3}
+            placeholder="Quais empresas, regime tributário, se pretende atendê-las também..."
+            wrapperClassName="sm:col-span-6"
+            maxLength={1000}
+          />
+        )}
         <Input
           label="Nº de funcionários"
           required
