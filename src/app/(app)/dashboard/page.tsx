@@ -16,7 +16,7 @@ export default async function DashboardPage() {
       supabase
         .from("atendimentos")
         .select(
-          "id, data, canal, meio_contato_inicial, indicado_por, uf, municipio, status, responsavel_id, campanha_id, etapa_maxima, data_visita, proposta_valor, produto_id, valor_fechado, data_fechamento, data_declinio",
+          "id, data, canal, meio_contato_inicial, indicado_por, uf, municipio, status, responsavel_id, campanha_id, etapa_maxima, data_visita, proposta_valor, produtos_fechados, valor_fechado, data_fechamento, data_declinio",
         )
         .range(from, to),
     ),

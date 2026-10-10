@@ -46,7 +46,7 @@ begin
       data_visita, tipo_visita,
       qualif_atividade, qualif_outras_empresas, qualif_funcionarios, qualif_faturamento_mensal,
       qualif_contabilidade_anterior, qualif_principal_dor, qualif_produtos,
-      proposta_produto_id, proposta_valor, produto_id, valor_fechado, data_fechamento,
+      proposta_produtos, proposta_valor, produtos_fechados, valor_fechado, data_fechamento,
       motivos_declinio, data_declinio
     ) values (
       v_data,
@@ -72,9 +72,9 @@ begin
       'Contabilidade anterior demo',
       'Principal dor informada na qualificação (demonstração).',
       array[v_prod],
-      case when v_status in ('proposta_enviada','negocio_efetivado') then v_prod end,
+      case when v_status in ('proposta_enviada','negocio_efetivado') then array[v_prod] else '{}'::uuid[] end,
       case when v_status in ('proposta_enviada','negocio_efetivado') then round((400 + random() * 3600)::numeric, 2) end,
-      case when v_status = 'negocio_efetivado' then v_prod end,
+      case when v_status = 'negocio_efetivado' then array[v_prod] else '{}'::uuid[] end,
       case when v_status = 'negocio_efetivado' then round((400 + random() * 3600)::numeric, 2) end,
       case when v_status = 'negocio_efetivado' then least(v_data + 20, current_date) end,
       case when v_status = 'negocio_declinado'

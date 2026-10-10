@@ -43,7 +43,8 @@ export function EtapaDetalhe({
   emAndamento: boolean;
   onVoltar: () => void;
 }) {
-  const nomeProduto = (id: string | null | undefined) => (id ? produtos.find((p) => p.id === id)?.nome ?? "Serviço removido" : "");
+  const nomeProduto = (id: string) => produtos.find((p) => p.id === id)?.nome ?? "Serviço removido";
+  const nomesProdutos = (ids: string[] | null | undefined) => (ids?.length ? ids.map(nomeProduto).join(", ") : "");
   const idsEtapa = new Set(historico.filter((h) => h.status_novo === status).map((h) => h.id));
   const registros = notas
     .filter((n) => n.historico_id !== null && idsEtapa.has(n.historico_id))
@@ -74,7 +75,7 @@ export function EtapaDetalhe({
           <span className="whitespace-pre-line">{a.qualif_principal_dor}</span>
         </Info>
         <Info label="Produtos/Serviços negociados" className="col-span-2 sm:col-span-3">
-          {a.qualif_produtos?.length ? a.qualif_produtos.map((id) => nomeProduto(id)).join(", ") : ""}
+          {nomesProdutos(a.qualif_produtos)}
         </Info>
       </>
     ),
@@ -87,14 +88,14 @@ export function EtapaDetalhe({
     ),
     proposta_enviada: (
       <>
-        <Info label="Serviço / pacote proposto">{nomeProduto(a.proposta_produto_id)}</Info>
+        <Info label="Serviços / pacotes propostos" className="col-span-2">{nomesProdutos(a.proposta_produtos)}</Info>
         <Info label="Valor proposto">{a.proposta_valor === null ? "" : formatBRL(a.proposta_valor)}</Info>
         <Info label="Data da proposta">{a.data_proposta ? formatDate(a.data_proposta) : ""}</Info>
       </>
     ),
     negocio_efetivado: (
       <>
-        <Info label="Serviço / pacote fechado">{nomeProduto(a.produto_id)}</Info>
+        <Info label="Serviços / pacotes fechados" className="col-span-2">{nomesProdutos(a.produtos_fechados)}</Info>
         <Info label="Valor fechado">{a.valor_fechado === null ? "" : formatBRL(a.valor_fechado)}</Info>
         <Info label="Data de fechamento">{a.data_fechamento ? formatDate(a.data_fechamento) : ""}</Info>
         <Info label="Conforme a proposta?">

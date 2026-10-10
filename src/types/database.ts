@@ -97,11 +97,13 @@ export interface Atendimento {
   qualif_contabilidade_anterior: string | null;
   qualif_principal_dor: string | null;
   qualif_produtos: string[];
-  proposta_produto_id: string | null;
+  /** Serviços/pacotes da proposta (pode haver mais de um). */
+  proposta_produtos: string[];
   proposta_valor: number | null;
   data_proposta: string | null;
   conforme_proposta: boolean | null;
-  produto_id: string | null;
+  /** Serviços/pacotes fechados (pode haver mais de um). */
+  produtos_fechados: string[];
   valor_fechado: number | null;
   data_fechamento: string | null;
   motivos_declinio: string[];

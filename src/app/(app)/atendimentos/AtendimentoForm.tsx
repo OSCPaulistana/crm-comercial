@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Ban, CheckCircle2, FileText, History, MessageSquarePlus, MoveRight, Pencil, RefreshCcw, Trash2 } from "lucide-react";
+import { Ban, FileText, History, MoveRight, Pencil, RefreshCcw, Shuffle, Trash2 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Field, Input, Select, Textarea } from "@/components/ui/Field";
@@ -83,6 +83,7 @@ type FormState = {
   municipio_ibge: number | null;
   /** Meio do PRIMEIRO contato — informado apenas no registro do lead. */
   meio_contato_inicial: MeioContato | "";
+  /** Etapa escolhida no registro do lead (depois, a etapa só muda pelas ações da esteira). */
   status: StatusAtendimento;
   responsavel_id: string;
   campanha_id: string;
@@ -90,11 +91,11 @@ type FormState = {
   observacao_etapa: string;
   data_visita: string;
   tipo_visita: TipoVisita | "";
-  proposta_produto_id: string;
+  proposta_produtos: string[];
   proposta_valor: string;
   data_proposta: string;
   conforme_proposta: "" | "sim" | "nao";
-  produto_id: string;
+  produtos_fechados: string[];
   valor_fechado: string;
   data_fechamento: string;
   motivos_declinio: string[];
@@ -122,11 +123,11 @@ function initialState(a: Atendimento | null, meuVendedorId: string | null): Form
     observacao_etapa: "",
     data_visita: a?.data_visita ?? "",
     tipo_visita: a?.tipo_visita ?? "",
-    proposta_produto_id: a?.proposta_produto_id ?? "",
+    proposta_produtos: a?.proposta_produtos ?? [],
     proposta_valor: moneyToInput(a?.proposta_valor),
     data_proposta: a?.data_proposta ?? "",
     conforme_proposta: a?.conforme_proposta === true ? "sim" : a?.conforme_proposta === false ? "nao" : "",
-    produto_id: a?.produto_id ?? "",
+    produtos_fechados: a?.produtos_fechados ?? [],
     valor_fechado: moneyToInput(a?.valor_fechado),
     data_fechamento: a?.data_fechamento ?? "",
     motivos_declinio: a?.motivos_declinio ?? [],
@@ -147,11 +148,16 @@ const CAMPOS_LEAD = [
   "meio_contato_inicial",
 ] as const;
 
-/** O que o usuário quer fazer nesta atualização. */
-type Acao = "manter" | "avancar" | "declinar" | "outra";
+type Erros = Partial<Record<keyof FormState, string>>;
+
+/** O checklist de qualificação é obrigatório para entrar em Agendado Visita ou etapas seguintes. */
+const exigeChecklist = (s: StatusAtendimento) => STATUS_MAP[s].etapa >= ETAPA_AGENDADO;
+
+/** Movimento de etapa em andamento (janela de confirmação). */
+type Movimento = { modo: "avancar" | "declinar" | "mover"; alvo: StatusAtendimento | "" };
 
 function AtendimentoFormInner({
-  atendimento,
+  atendimento: atendimentoInicial,
   onClose,
   vendedores,
   campanhas,
@@ -164,18 +170,21 @@ function AtendimentoFormInner({
   const router = useRouter();
   const toast = useToast();
   const supabase = createClient();
-  const editing = atendimento !== null;
+  const editing = atendimentoInicial !== null;
 
-  const [f, setF] = useState<FormState>(() => initialState(atendimento, meuVendedorId));
-  const [chk, setChk] = useState<ChecklistValores>(() => checklistDe(atendimento));
+  // Cópia local do atendimento: após cada gravação é relida, para a tela já mostrar a nova etapa
+  const [atendimento, setAtendimento] = useState<Atendimento | null>(atendimentoInicial);
+  const [f, setF] = useState<FormState>(() => initialState(atendimentoInicial, meuVendedorId));
+  const [chk, setChk] = useState<ChecklistValores>(() => checklistDe(atendimentoInicial));
   const [chkErros, setChkErros] = useState<ChecklistErros>({});
   const [arquivos, setArquivos] = useState<File[]>([]);
   const [editarDados, setEditarDados] = useState(!editing);
-  const [acao, setAcao] = useState<Acao>("manter");
-  const [outraStatus, setOutraStatus] = useState<StatusAtendimento | "">("");
   /** Etapa anterior em consulta (somente leitura). null = painel de atualização. */
   const [verEtapa, setVerEtapa] = useState<StatusAtendimento | null>(null);
-  const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>({});
+  const [mover, setMover] = useState<Movimento | null>(null);
+  const [obsDestino, setObsDestino] = useState("");
+  const [erroAlvo, setErroAlvo] = useState("");
+  const [errors, setErrors] = useState<Erros>({});
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -232,51 +241,19 @@ function AtendimentoFormInner({
   /* ------------------------------------------------------------------ */
   /* Estado derivado                                                     */
   /* ------------------------------------------------------------------ */
+  /** Etapa gravada do atendimento (no registro do lead, a escolhida no formulário). */
   const statusOriginal = atendimento?.status ?? null;
-  const mudouEtapa = editing && f.status !== statusOriginal;
-  const etapa = STATUS_MAP[f.status].etapa;
+  const statusPainel: StatusAtendimento = statusOriginal ?? f.status;
   const etapaOriginal = statusOriginal ? STATUS_MAP[statusOriginal].etapa : 0;
-  const isAgendado = f.status === "agendado_visita";
-  const isVisitaRealizada = f.status === "visita_realizada";
-  const isProposta = f.status === "proposta_enviada";
-  const isEfetivado = f.status === "negocio_efetivado";
-  const isDeclinado = f.status === "negocio_declinado";
   const temProposta = parseMoney(f.proposta_valor) > 0;
-  const fechouConforme = isEfetivado && temProposta && f.conforme_proposta === "sim";
-  const avancou = mudouEtapa && etapa > etapaOriginal;
-
-  // Checklist: obrigatório para sair da Qualificação (agendar visita em diante)
-  const exigeChecklist = etapa >= ETAPA_AGENDADO && !isDeclinado;
   const checklistCompleto = checklistPendencias(chk).length === 0;
-  const mostraChecklist = f.status === "qualificacao" || (exigeChecklist && !checklistCompleto);
 
   // Próxima etapa do funil (a seguinte à etapa atual do atendimento)
   const proxima = statusOriginal && etapaOriginal > 0 && etapaOriginal < 6 ? STATUS.find((s) => s.etapa === etapaOriginal + 1) : null;
+  const podeDeclinar = statusOriginal !== null && statusOriginal !== "negocio_declinado" && statusOriginal !== "negocio_efetivado";
 
   const temRegistro = Boolean(f.observacao_etapa.trim() || arquivos.length);
   const podeExcluirNota = (n: NotaRow) => podeExcluir || n.usuario_id === meuUsuarioId;
-
-  const escolherAcao = (a: Acao) => {
-    setAcao(a);
-    setErrors({});
-    setChkErros({});
-    const alvo: StatusAtendimento | null =
-      a === "manter" ? statusOriginal : a === "avancar" ? proxima?.value ?? statusOriginal : a === "declinar" ? "negocio_declinado" : outraStatus || statusOriginal;
-    if (alvo) setF((prev) => ({ ...prev, status: alvo }));
-  };
-
-  const escolherOutra = (s: StatusAtendimento | "") => {
-    setOutraStatus(s);
-    setErrors({});
-    setChkErros({});
-    setF((prev) => ({ ...prev, status: s || (statusOriginal ?? prev.status) }));
-  };
-
-  const onStatusInicial = (s: StatusAtendimento) => {
-    setF((prev) => ({ ...prev, status: s }));
-    setErrors({});
-    setChkErros({});
-  };
 
   const selecionarEtapa = (s: StatusAtendimento) => {
     setVerEtapa((atual) => (s === atendimento?.status || atual === s ? null : s));
@@ -298,12 +275,11 @@ function AtendimentoFormInner({
     router.refresh();
   }
 
-  const produtosAtivos = useMemo(
-    () => produtos.filter((p) => p.ativo || p.id === f.produto_id || p.id === f.proposta_produto_id || chk.q_produtos.includes(p.id)),
-    [produtos, f.produto_id, f.proposta_produto_id, chk.q_produtos],
-  );
-  const produtoOptions = produtosAtivos.map((p) => ({ value: p.id, label: `${p.nome} (${RECORRENCIA_LABEL[p.recorrencia]})` }));
-  const produtoNome = (id: string | null | undefined) => produtos.find((p) => p.id === id)?.nome ?? "Serviço não informado";
+  const produtoOptions = (selecionados: string[]) =>
+    produtos
+      .filter((p) => p.ativo || selecionados.includes(p.id))
+      .map((p) => ({ value: p.id, label: `${p.nome} (${RECORRENCIA_LABEL[p.recorrencia]})` }));
+  const nomesProdutos = (ids: string[]) => ids.map((id) => produtos.find((p) => p.id === id)?.nome ?? "Serviço removido").join(", ");
   const vendedoresAtivos = useMemo(
     () => vendedores.filter((v) => v.ativo || v.id === f.responsavel_id),
     [vendedores, f.responsavel_id],
@@ -312,10 +288,10 @@ function AtendimentoFormInner({
   const campanhaNome = (id: string) => campanhas.find((c) => c.id === id)?.nome ?? "—";
 
   /* ------------------------------------------------------------------ */
-  /* Validação e gravação                                                */
+  /* Validação                                                           */
   /* ------------------------------------------------------------------ */
-  function validate() {
-    const e: typeof errors = {};
+  function errosLead(): Erros {
+    const e: Erros = {};
     if (!f.data) e.data = "Informe a data.";
     if (!f.lead.trim()) e.lead = "Informe o nome do cliente.";
     if (!f.porte) e.porte = "Selecione o porte.";
@@ -326,60 +302,122 @@ function AtendimentoFormInner({
     if (!f.municipio) e.municipio = "Selecione o município.";
     if (!f.responsavel_id) e.responsavel_id = "Selecione o responsável.";
     if (!editing && !f.meio_contato_inicial) e.meio_contato_inicial = "Informe o meio do primeiro contato.";
-    if (acao === "outra" && !outraStatus) e.status = "Selecione a etapa de destino.";
-    if (isAgendado && !f.data_visita) e.data_visita = "Informe a data da visita agendada.";
-    if (isVisitaRealizada && !f.tipo_visita) e.tipo_visita = "Informe se foi visita ou reunião no escritório.";
-    if (isProposta) {
-      if (!f.proposta_produto_id) e.proposta_produto_id = "Selecione o serviço/pacote proposto.";
-      if (parseMoney(f.proposta_valor) <= 0) e.proposta_valor = "Informe o valor da proposta.";
+    return e;
+  }
+
+  /** O que a etapa `s` exige. */
+  function errosEtapa(s: StatusAtendimento): Erros {
+    const e: Erros = {};
+    if (s === "agendado_visita" && !f.data_visita) e.data_visita = "Informe a data da visita agendada.";
+    if (s === "visita_realizada" && !f.tipo_visita) e.tipo_visita = "Informe se foi visita ou reunião no escritório.";
+    if (s === "proposta_enviada") {
+      if (f.proposta_produtos.length === 0) e.proposta_produtos = "Selecione ao menos um serviço/pacote.";
+      if (parseMoney(f.proposta_valor) <= 0) e.proposta_valor = "Informe o valor total da proposta.";
     }
-    if (isEfetivado) {
+    if (s === "negocio_efetivado") {
+      const conforme = temProposta && f.conforme_proposta === "sim";
       if (temProposta && !f.conforme_proposta) e.conforme_proposta = "Confirme se o fechamento foi conforme a proposta.";
-      if (!fechouConforme) {
-        if (!f.produto_id) e.produto_id = "Selecione o serviço/pacote fechado.";
+      if (!conforme) {
+        if (f.produtos_fechados.length === 0) e.produtos_fechados = "Selecione ao menos um serviço/pacote fechado.";
         if (parseMoney(f.valor_fechado) <= 0) e.valor_fechado = "Informe o valor fechado.";
       }
     }
-    if (isDeclinado && f.motivos_declinio.length === 0) e.motivos_declinio = "Selecione ao menos um motivo.";
-    if (isDeclinado && f.motivos_declinio.includes("Outro") && !f.motivo_declinio_outro.trim())
-      e.motivo_declinio_outro = "Descreva o motivo.";
-    const ce = exigeChecklist ? checklistErros(chk) : {};
+    if (s === "negocio_declinado") {
+      if (f.motivos_declinio.length === 0) e.motivos_declinio = "Selecione ao menos um motivo.";
+      if (f.motivos_declinio.includes("Outro") && !f.motivo_declinio_outro.trim()) e.motivo_declinio_outro = "Descreva o motivo.";
+    }
+    return e;
+  }
+
+  /** Valida o dado do lead + as exigências da etapa de destino e mostra os erros. */
+  function validarTudo(alvo: StatusAtendimento) {
+    const e = { ...errosLead(), ...errosEtapa(alvo) };
+    const ce = exigeChecklist(alvo) ? checklistErros(chk) : {};
     setErrors(e);
     setChkErros(ce);
     if (CAMPOS_LEAD.some((k) => e[k])) setEditarDados(true);
     return Object.keys(e).length === 0 && Object.keys(ce).length === 0;
   }
 
-  async function save() {
-    if (!validate()) {
+  /* ------------------------------------------------------------------ */
+  /* Gravação                                                            */
+  /* ------------------------------------------------------------------ */
+  async function etapaMaisRecente(atendimentoId: string) {
+    const { data } = await supabase
+      .from("atendimento_historico")
+      .select("id")
+      .eq("atendimento_id", atendimentoId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    return (data as { id: string } | null)?.id ?? null;
+  }
+
+  async function criarNota(
+    atendimentoId: string,
+    historicoId: string | null,
+    status: StatusAtendimento,
+    texto: string,
+    files: File[],
+    meio: MeioContato | "",
+  ) {
+    const { data: nota, error } = await supabase
+      .from("atendimento_notas")
+      .insert({
+        atendimento_id: atendimentoId,
+        historico_id: historicoId,
+        status,
+        meio_contato: meio || null,
+        texto: texto.trim() || null,
+      })
+      .select("id")
+      .single();
+    if (error || !nota) return { ok: false as const, erro: error, falhas: [] as string[] };
+    const { falhas } = files.length
+      ? await enviarAnexos(supabase, atendimentoId, (nota as { id: string }).id, files)
+      : { falhas: [] as string[] };
+    return { ok: true as const, erro: null, falhas };
+  }
+
+  /**
+   * Grava o atendimento. `destino` = nova etapa (avançar/declinar/mover); sem ele, a etapa
+   * não muda (apenas dados e registros). Retorna true se gravou.
+   */
+  async function salvar(destino?: StatusAtendimento, observacaoDestino = ""): Promise<boolean> {
+    const alvo: StatusAtendimento = editing ? (destino ?? statusOriginal!) : f.status;
+    const mudou = editing && alvo !== statusOriginal;
+
+    if (!validarTudo(alvo)) {
       toast.error(
         "Não foi possível salvar o atendimento.",
-        exigeChecklist && !checklistCompleto
+        exigeChecklist(alvo) && !checklistCompleto
           ? "Complete o checklist de qualificação para avançar de etapa."
           : "Verifique os campos destacados e tente novamente.",
       );
-      return;
+      return false;
     }
     setSaving(true);
 
+    const fechouConforme = alvo === "negocio_efetivado" && temProposta && f.conforme_proposta === "sim";
     const proposta = {
-      proposta_produto_id: f.proposta_produto_id || null,
+      proposta_produtos: f.proposta_produtos,
       proposta_valor: temProposta ? parseMoney(f.proposta_valor) : null,
       data_proposta: temProposta ? f.data_proposta || null : null,
     };
-    const fechamento = isEfetivado
-      ? {
-          produto_id: fechouConforme ? proposta.proposta_produto_id : f.produto_id || null,
-          valor_fechado: fechouConforme ? proposta.proposta_valor : parseMoney(f.valor_fechado),
-          data_fechamento: f.data_fechamento || todayISO(),
-          conforme_proposta: temProposta ? f.conforme_proposta === "sim" : null,
-        }
-      : {
-          produto_id: atendimento?.produto_id ?? null,
-          valor_fechado: atendimento?.valor_fechado ?? null,
-          data_fechamento: null,
-          conforme_proposta: null,
-        };
+    const fechamento =
+      alvo === "negocio_efetivado"
+        ? {
+            produtos_fechados: fechouConforme ? f.proposta_produtos : f.produtos_fechados,
+            valor_fechado: fechouConforme ? proposta.proposta_valor : parseMoney(f.valor_fechado),
+            data_fechamento: f.data_fechamento || todayISO(),
+            conforme_proposta: temProposta ? f.conforme_proposta === "sim" : null,
+          }
+        : {
+            produtos_fechados: atendimento?.produtos_fechados ?? [],
+            valor_fechado: atendimento?.valor_fechado ?? null,
+            data_fechamento: null,
+            conforme_proposta: null,
+          };
 
     const payload = {
       data: f.data,
@@ -394,7 +432,7 @@ function AtendimentoFormInner({
       municipio: f.municipio || null,
       municipio_ibge: f.municipio_ibge,
       meio_contato_inicial: f.meio_contato_inicial || null,
-      status: f.status,
+      status: alvo,
       responsavel_id: f.responsavel_id || null,
       campanha_id: f.campanha_id || null,
       data_visita: f.data_visita || null,
@@ -402,81 +440,101 @@ function AtendimentoFormInner({
       ...checklistParaBanco(chk),
       ...proposta,
       ...fechamento,
-      motivos_declinio: isDeclinado ? f.motivos_declinio : [],
-      motivo_declinio_outro: isDeclinado && f.motivos_declinio.includes("Outro") ? f.motivo_declinio_outro.trim() : null,
+      motivos_declinio: alvo === "negocio_declinado" ? f.motivos_declinio : [],
+      motivo_declinio_outro:
+        alvo === "negocio_declinado" && f.motivos_declinio.includes("Outro") ? f.motivo_declinio_outro.trim() : null,
     };
 
-    // 1) Atendimento (a mudança de status cria a etapa na linha do tempo)
+    // Ao mudar de etapa, o texto/anexos já digitados no painel pertencem à etapa que está sendo concluída
+    const etapaAntiga = editing && mudou && temRegistro ? await etapaMaisRecente(atendimento!.id) : null;
+
+    // 1) Atendimento (a mudança de etapa cria a nova linha na linha do tempo)
     let atendimentoId = atendimento?.id ?? "";
     if (editing) {
-      const { error } = await supabase.from("atendimentos").update(payload).eq("id", atendimento.id);
-      if (error) {
+      // .select("id") confirma que o banco realmente alterou a linha (sem isso, uma gravação bloqueada
+      // por permissão ou por sessão expirada passaria como sucesso)
+      const { data: alterados, error } = await supabase.from("atendimentos").update(payload).eq("id", atendimento!.id).select("id");
+      if (error || !alterados?.length) {
         setSaving(false);
-        toast.error("Não foi possível salvar o atendimento.", supabaseErrorMessage(error, "Tente novamente em instantes."));
-        return;
+        toast.error(
+          "Não foi possível salvar o atendimento.",
+          error
+            ? supabaseErrorMessage(error, "Tente novamente em instantes.")
+            : "A alteração não foi gravada. Sua sessão pode ter expirado: recarregue a página e entre novamente.",
+        );
+        return false;
       }
     } else {
       const { data, error } = await supabase.from("atendimentos").insert(payload).select("id").single();
       if (error || !data) {
         setSaving(false);
         toast.error("Não foi possível salvar o atendimento.", supabaseErrorMessage(error, "Tente novamente em instantes."));
-        return;
+        return false;
       }
       atendimentoId = (data as { id: string }).id;
     }
 
-    // 2) Registro (observação) na etapa e 3) anexos.
-    //    No registro do lead, o 1º registro leva o meio do primeiro contato.
-    let falhasAnexo: string[] = [];
-    if (!editing || temRegistro) {
-      const { data: etapaAtual } = await supabase
-        .from("atendimento_historico")
-        .select("id")
-        .eq("atendimento_id", atendimentoId)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      const { data: nota, error: notaErr } = await supabase
-        .from("atendimento_notas")
-        .insert({
-          atendimento_id: atendimentoId,
-          historico_id: (etapaAtual as { id: string } | null)?.id ?? null,
-          status: f.status,
-          meio_contato: !editing ? f.meio_contato_inicial || null : null,
-          texto: f.observacao_etapa.trim() || null,
-        })
-        .select("id")
-        .single();
-      if (notaErr || !nota) {
-        setSaving(false);
-        toast.error("O atendimento foi salvo, mas não o registro da etapa.", supabaseErrorMessage(notaErr, "Tente novamente."));
-        router.refresh();
-        return;
-      }
-      if (arquivos.length) {
-        ({ falhas: falhasAnexo } = await enviarAnexos(supabase, atendimentoId, (nota as { id: string }).id, arquivos));
-      }
+    // 2) Registros (observações + anexos)
+    const falhasAnexo: string[] = [];
+    let erroNota: unknown = null;
+    const registrar = async (r: Awaited<ReturnType<typeof criarNota>>) => {
+      if (!r.ok) erroNota = r.erro ?? true;
+      falhasAnexo.push(...r.falhas);
+    };
+    if (!editing) {
+      // registro do lead: o 1º registro leva o meio do primeiro contato
+      await registrar(await criarNota(atendimentoId, await etapaMaisRecente(atendimentoId), f.status, f.observacao_etapa, arquivos, f.meio_contato_inicial));
+    } else if (mudou) {
+      if (temRegistro) await registrar(await criarNota(atendimentoId, etapaAntiga, statusOriginal!, f.observacao_etapa, arquivos, ""));
+      if (observacaoDestino.trim())
+        await registrar(await criarNota(atendimentoId, await etapaMaisRecente(atendimentoId), alvo, observacaoDestino, [], ""));
+    } else if (temRegistro) {
+      await registrar(await criarNota(atendimentoId, await etapaMaisRecente(atendimentoId), statusOriginal!, f.observacao_etapa, arquivos, ""));
     }
 
-    setSaving(false);
-    const virouDeclinado = isDeclinado && statusOriginal !== "negocio_declinado";
+    // 3) Feedback
+    const virouDeclinado = alvo === "negocio_declinado" && statusOriginal !== "negocio_declinado";
+    const avancou = mudou && STATUS_MAP[alvo].etapa > etapaOriginal;
     toast.success(
       !editing
         ? "Atendimento registrado com sucesso."
-        : mudouEtapa
-          ? avancou
-            ? `Etapa concluída. O lead agora está em ${STATUS_MAP[f.status].label}.`
-            : `Etapa alterada para ${STATUS_MAP[f.status].label}.`
+        : mudou
+          ? alvo === "negocio_declinado"
+            ? "Negócio declinado."
+            : avancou
+              ? `Etapa concluída. O lead agora está em ${STATUS_MAP[alvo].label}.`
+              : `Lead movido para ${STATUS_MAP[alvo].label}.`
           : temRegistro
             ? "Registro adicionado à linha do tempo."
             : "Atendimento atualizado com sucesso.",
       virouDeclinado ? `O lead foi enviado para o Giro de Carteira (1º giro em ${GIRO_INTERVALO_DIAS} dias).` : undefined,
     );
-    if (falhasAnexo.length) {
-      toast.error("Alguns anexos não foram enviados.", falhasAnexo.join(", "));
+    if (erroNota) toast.error("O atendimento foi salvo, mas o registro da etapa não.", supabaseErrorMessage(erroNota as { code?: string }, "Tente novamente."));
+    if (falhasAnexo.length) toast.error("Alguns anexos não foram enviados.", falhasAnexo.join(", "));
+
+    if (!editing) {
+      setSaving(false);
+      router.refresh();
+      onClose();
+      return true;
     }
+
+    // Edição: relê o atendimento e permanece na tela, já mostrando a etapa gravada
+    const { data: novo } = await supabase.from("atendimentos").select("*").eq("id", atendimentoId).single();
+    if (novo) {
+      const a = novo as Atendimento;
+      setAtendimento(a);
+      setF(initialState(a, meuVendedorId));
+      setChk(checklistDe(a));
+      setArquivos([]);
+      setEditarDados(false);
+      setVerEtapa(null);
+    }
+    setErrors({});
+    setChkErros({});
+    setSaving(false);
     router.refresh();
-    onClose();
+    return true;
   }
 
   async function remove() {
@@ -495,6 +553,56 @@ function AtendimentoFormInner({
     router.refresh();
     onClose();
   }
+
+  /* ------------------------------------------------------------------ */
+  /* Ações da esteira                                                    */
+  /* ------------------------------------------------------------------ */
+  /** O que falta preencher para ENTRAR na etapa `s` (vazio = pode gravar direto). */
+  function faltaParaEntrar(s: StatusAtendimento) {
+    return Object.keys(errosEtapa(s)).length > 0 || (exigeChecklist(s) && !checklistCompleto);
+  }
+
+  /** Clique em "Concluir etapa e avançar", "Declinar" ou "Mover": valida o painel e grava ou pede o que falta. */
+  async function iniciarMovimento(modo: Movimento["modo"], alvo: StatusAtendimento | "") {
+    const lead = errosLead();
+    const ce = alvo && exigeChecklist(alvo) ? checklistErros(chk) : {};
+    if (Object.keys(lead).length || Object.keys(ce).length) {
+      setErrors(lead);
+      setChkErros(ce);
+      if (CAMPOS_LEAD.some((k) => lead[k])) setEditarDados(true);
+      toast.error(
+        "Ainda não é possível mudar de etapa.",
+        Object.keys(ce).length ? "Complete o checklist de qualificação." : "Verifique os campos destacados.",
+      );
+      return;
+    }
+    setErrors({});
+    setChkErros({});
+    // Etapa que não pede nenhum dado novo: grava com um clique
+    if (alvo && !faltaParaEntrar(alvo)) {
+      await salvar(alvo);
+      return;
+    }
+    setObsDestino("");
+    setErroAlvo("");
+    setMover({ modo, alvo });
+  }
+
+  async function confirmarMovimento() {
+    if (!mover) return;
+    if (!mover.alvo) {
+      setErroAlvo("Selecione a etapa de destino.");
+      return;
+    }
+    const ok = await salvar(mover.alvo, obsDestino);
+    if (ok) setMover(null);
+  }
+
+  const cancelarMovimento = () => {
+    setMover(null);
+    setErrors({});
+    setChkErros({});
+  };
 
   const onPorte = (v: string) => {
     set("porte", v);
@@ -634,12 +742,7 @@ function AtendimentoFormInner({
         wrapperClassName="sm:col-span-3"
       />
       {/* O meio de contato é perguntado apenas aqui, no registro do lead (1º contato) */}
-      <Field
-        label="Meio do primeiro contato"
-        required={!editing}
-        error={errors.meio_contato_inicial}
-        className="sm:col-span-6"
-      >
+      <Field label="Meio do primeiro contato" required={!editing} error={errors.meio_contato_inicial} className="sm:col-span-6">
         <MeioContatoPicker
           value={f.meio_contato_inicial}
           onChange={(v) => set("meio_contato_inicial", v)}
@@ -649,200 +752,229 @@ function AtendimentoFormInner({
     </div>
   );
 
-  /** Campos específicos da etapa de destino. */
-  const camposEtapa = (
-    <>
-      {(isAgendado || isVisitaRealizada) && (
-        <Input
-          label={isAgendado ? "Data da visita/reunião agendada" : "Data da visita/reunião"}
-          type="date"
-          required={isAgendado}
-          value={f.data_visita}
-          onChange={(e) => set("data_visita", e.target.value)}
-          error={errors.data_visita}
-          wrapperClassName="max-w-xs"
-        />
-      )}
+  /** Campos que pertencem à etapa `s` (painel da etapa atual ou janela da etapa de destino). */
+  const camposEtapa = (s: StatusAtendimento) => {
+    const agendado = s === "agendado_visita";
+    const visita = s === "visita_realizada";
+    const proposta = s === "proposta_enviada";
+    const efetivado = s === "negocio_efetivado";
+    const declinado = s === "negocio_declinado";
+    const conforme = efetivado && temProposta && f.conforme_proposta === "sim";
+    const mostraChecklist = s === "qualificacao" || (exigeChecklist(s) && !checklistCompleto);
 
-      {isVisitaRealizada && (
-        <Field label="O que foi realizado" required error={errors.tipo_visita}>
-          <div role="radiogroup" aria-label="Tipo" className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            {TIPOS_VISITA.map((t) => {
-              const sel = f.tipo_visita === t;
-              return (
-                <button
-                  key={t}
-                  type="button"
-                  role="radio"
-                  aria-checked={sel}
-                  onClick={() => set("tipo_visita", t)}
-                  className={`flex h-10 items-center justify-center rounded-md border text-sm transition-colors ${
-                    sel
-                      ? "border-accent bg-accent-soft font-medium text-[#1d4ed8]"
-                      : errors.tipo_visita
-                        ? "border-danger/60 bg-surface text-fg hover:bg-gray-50"
-                        : "border-line-strong bg-surface text-fg hover:bg-gray-50"
-                  }`}
-                >
-                  {t}
-                </button>
-              );
-            })}
-          </div>
-        </Field>
-      )}
-
-      {mostraChecklist && (
-        <Checklist valores={chk} onChange={mudarChecklist} erros={chkErros} produtos={produtos.filter((p) => p.ativo || chk.q_produtos.includes(p.id))} obrigatorio={exigeChecklist} />
-      )}
-
-      {isProposta && (
-        <div className="grid grid-cols-1 gap-4 rounded-[10px] border border-[#fde68a] bg-warning-soft/60 p-4 sm:grid-cols-3">
-          <p className="flex items-center gap-2 text-sm font-medium text-fg sm:col-span-3">
-            <FileText className="size-4 text-warning" aria-hidden /> Dados da proposta
-          </p>
-          <Select
-            label="Serviço / pacote proposto"
-            required
-            value={f.proposta_produto_id}
-            onChange={(e) => set("proposta_produto_id", e.target.value)}
-            placeholder={produtoOptions.length ? "Selecione" : "Nenhum serviço cadastrado"}
-            options={produtoOptions}
-            error={errors.proposta_produto_id}
-            wrapperClassName="sm:col-span-3"
-          />
-          {moneyField("proposta_valor", "Valor proposto (R$)", "Entra na projeção de faturamento do dashboard.", "sm:col-span-2")}
+    return (
+      <>
+        {(agendado || visita) && (
           <Input
-            label="Data da proposta"
+            label={agendado ? "Data da visita/reunião agendada" : "Data da visita/reunião"}
             type="date"
-            value={f.data_proposta || todayISO()}
-            onChange={(e) => set("data_proposta", e.target.value)}
+            required={agendado}
+            value={f.data_visita}
+            onChange={(e) => set("data_visita", e.target.value)}
+            error={errors.data_visita}
+            wrapperClassName="max-w-xs"
           />
-        </div>
-      )}
+        )}
 
-      {isEfetivado && (
-        <div className="grid grid-cols-1 gap-4 rounded-[10px] border border-[#bbf7d0] bg-success-soft/60 p-4 sm:grid-cols-3">
-          {temProposta ? (
-            <>
-              <div className="rounded-md border border-line bg-surface p-3 text-sm sm:col-span-3">
-                <p className="text-xs text-fg-2">Proposta enviada{f.data_proposta ? ` em ${formatDate(f.data_proposta)}` : ""}</p>
-                <p className="mt-0.5 font-medium text-fg">
-                  {produtoNome(f.proposta_produto_id)} — {formatBRL(parseMoney(f.proposta_valor))}
-                </p>
-              </div>
-              <fieldset className="sm:col-span-3">
-                <legend className="field-label">
-                  O pacote e o valor foram fechados conforme a proposta?<span className="ml-0.5 text-danger">*</span>
-                </legend>
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    { v: "sim" as const, l: "Sim, conforme a proposta" },
-                    { v: "nao" as const, l: "Não, houve alteração" },
-                  ].map((o) => (
-                    <label
-                      key={o.v}
-                      className={`flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors ${
-                        f.conforme_proposta === o.v ? "border-accent bg-accent-soft/60" : "border-line bg-surface hover:bg-gray-50"
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="conforme"
-                        checked={f.conforme_proposta === o.v}
-                        onChange={() => {
-                          setF((s) => ({
-                            ...s,
-                            conforme_proposta: o.v,
-                            produto_id: o.v === "nao" && !s.produto_id ? s.proposta_produto_id : s.produto_id,
-                            valor_fechado: o.v === "nao" && !s.valor_fechado ? s.proposta_valor : s.valor_fechado,
-                          }));
-                          setErrors((e) => ({ ...e, conforme_proposta: undefined }));
-                        }}
-                        className="size-4 accent-[#2563eb]"
-                      />
-                      {o.l}
-                    </label>
-                  ))}
-                </div>
-                {errors.conforme_proposta && <p className="field-error">{errors.conforme_proposta}</p>}
-              </fieldset>
-            </>
-          ) : (
-            <p className="text-[13px] text-fg-2 sm:col-span-3">
-              Este atendimento não passou pela etapa de proposta. Informe o serviço e o valor fechados.
-            </p>
-          )}
-
-          {(!temProposta || f.conforme_proposta === "nao") && (
-            <>
-              <Select
-                label="Serviço / pacote fechado"
-                required
-                value={f.produto_id}
-                onChange={(e) => set("produto_id", e.target.value)}
-                placeholder="Selecione"
-                options={produtoOptions}
-                error={errors.produto_id}
-                wrapperClassName="sm:col-span-3"
-              />
-              {moneyField("valor_fechado", "Valor fechado (R$)", "Alimenta o faturamento do dashboard.", "sm:col-span-2")}
-            </>
-          )}
-          <Input
-            label="Data de fechamento"
-            type="date"
-            value={f.data_fechamento || todayISO()}
-            onChange={(e) => set("data_fechamento", e.target.value)}
-          />
-        </div>
-      )}
-
-      {isDeclinado && (
-        <div className="grid grid-cols-1 gap-4 rounded-[10px] border border-[#fecaca] bg-danger-soft/60 p-4">
-          <Field label="Motivos do declínio" required error={errors.motivos_declinio} htmlFor="motivos">
-            <MultiSelect
-              id="motivos"
-              options={MOTIVOS_DECLINIO}
-              value={f.motivos_declinio}
-              onChange={(v) => set("motivos_declinio", v)}
-              placeholder="Selecione um ou mais motivos"
-              invalid={Boolean(errors.motivos_declinio)}
-            />
+        {visita && (
+          <Field label="O que foi realizado" required error={errors.tipo_visita}>
+            <div role="radiogroup" aria-label="Tipo" className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {TIPOS_VISITA.map((t) => {
+                const sel = f.tipo_visita === t;
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    role="radio"
+                    aria-checked={sel}
+                    onClick={() => set("tipo_visita", t)}
+                    className={`flex h-10 items-center justify-center rounded-md border text-sm transition-colors ${
+                      sel
+                        ? "border-accent bg-accent-soft font-medium text-[#1d4ed8]"
+                        : errors.tipo_visita
+                          ? "border-danger/60 bg-surface text-fg hover:bg-gray-50"
+                          : "border-line-strong bg-surface text-fg hover:bg-gray-50"
+                    }`}
+                  >
+                    {t}
+                  </button>
+                );
+              })}
+            </div>
           </Field>
-          {f.motivos_declinio.includes("Outro") && (
-            <Input
-              label="Descreva o motivo"
+        )}
+
+        {mostraChecklist && (
+          <Checklist
+            valores={chk}
+            onChange={mudarChecklist}
+            erros={chkErros}
+            produtos={produtos.filter((p) => p.ativo || chk.q_produtos.includes(p.id))}
+            obrigatorio={exigeChecklist(s)}
+          />
+        )}
+
+        {proposta && (
+          <div className="grid grid-cols-1 gap-4 rounded-[10px] border border-[#fde68a] bg-warning-soft/60 p-4 sm:grid-cols-3">
+            <p className="flex items-center gap-2 text-sm font-medium text-fg sm:col-span-3">
+              <FileText className="size-4 text-warning" aria-hidden /> Dados da proposta
+            </p>
+            <Field
+              label="Serviços / pacotes propostos"
               required
-              value={f.motivo_declinio_outro}
-              onChange={(e) => set("motivo_declinio_outro", e.target.value)}
-              error={errors.motivo_declinio_outro}
+              error={errors.proposta_produtos}
+              hint="Pode selecionar mais de um serviço."
+              className="sm:col-span-3"
+              htmlFor="proposta-produtos"
+            >
+              <MultiSelect
+                id="proposta-produtos"
+                options={produtoOptions(f.proposta_produtos)}
+                value={f.proposta_produtos}
+                onChange={(v) => set("proposta_produtos", v)}
+                placeholder={produtos.length ? "Selecione um ou mais" : "Nenhum serviço cadastrado"}
+                pluralLabel="serviços"
+                invalid={Boolean(errors.proposta_produtos)}
+              />
+            </Field>
+            {moneyField("proposta_valor", "Valor total proposto (R$)", "Entra na projeção de faturamento do dashboard.", "sm:col-span-2")}
+            <Input
+              label="Data da proposta"
+              type="date"
+              value={f.data_proposta || todayISO()}
+              onChange={(e) => set("data_proposta", e.target.value)}
             />
-          )}
-          <p className="flex items-center gap-2 text-xs text-fg-2">
-            <RefreshCcw className="size-3.5" aria-hidden />
-            {giro && giro.status === "ativo"
-              ? `No Giro de Carteira — ${giro.etapa}º giro previsto para ${formatDate(giro.proxima_data)}.`
-              : `Ao salvar, o lead entra no Giro de Carteira com o 1º giro agendado para ${GIRO_INTERVALO_DIAS} dias.`}
-          </p>
-        </div>
-      )}
-    </>
-  );
+          </div>
+        )}
+
+        {efetivado && (
+          <div className="grid grid-cols-1 gap-4 rounded-[10px] border border-[#bbf7d0] bg-success-soft/60 p-4 sm:grid-cols-3">
+            {temProposta ? (
+              <>
+                <div className="rounded-md border border-line bg-surface p-3 text-sm sm:col-span-3">
+                  <p className="text-xs text-fg-2">Proposta enviada{f.data_proposta ? ` em ${formatDate(f.data_proposta)}` : ""}</p>
+                  <p className="mt-0.5 font-medium text-fg">
+                    {nomesProdutos(f.proposta_produtos) || "Serviço não informado"} — {formatBRL(parseMoney(f.proposta_valor))}
+                  </p>
+                </div>
+                <fieldset className="sm:col-span-3">
+                  <legend className="field-label">
+                    Os serviços e o valor foram fechados conforme a proposta?<span className="ml-0.5 text-danger">*</span>
+                  </legend>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { v: "sim" as const, l: "Sim, conforme a proposta" },
+                      { v: "nao" as const, l: "Não, houve alteração" },
+                    ].map((o) => (
+                      <label
+                        key={o.v}
+                        className={`flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors ${
+                          f.conforme_proposta === o.v ? "border-accent bg-accent-soft/60" : "border-line bg-surface hover:bg-gray-50"
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="conforme"
+                          checked={f.conforme_proposta === o.v}
+                          onChange={() => {
+                            setF((x) => ({
+                              ...x,
+                              conforme_proposta: o.v,
+                              // alteração: parte dos dados da proposta para ajustar
+                              produtos_fechados: o.v === "nao" && x.produtos_fechados.length === 0 ? x.proposta_produtos : x.produtos_fechados,
+                              valor_fechado: o.v === "nao" && !x.valor_fechado ? x.proposta_valor : x.valor_fechado,
+                            }));
+                            setErrors((e) => ({ ...e, conforme_proposta: undefined }));
+                          }}
+                          className="size-4 accent-[#2563eb]"
+                        />
+                        {o.l}
+                      </label>
+                    ))}
+                  </div>
+                  {errors.conforme_proposta && <p className="field-error">{errors.conforme_proposta}</p>}
+                </fieldset>
+              </>
+            ) : (
+              <p className="text-[13px] text-fg-2 sm:col-span-3">
+                Este atendimento não passou pela etapa de proposta. Informe os serviços e o valor fechados.
+              </p>
+            )}
+
+            {!conforme && (!temProposta || f.conforme_proposta === "nao") && (
+              <>
+                <Field
+                  label="Serviços / pacotes fechados"
+                  required
+                  error={errors.produtos_fechados}
+                  hint="Pode selecionar mais de um serviço."
+                  className="sm:col-span-3"
+                  htmlFor="fechados-produtos"
+                >
+                  <MultiSelect
+                    id="fechados-produtos"
+                    options={produtoOptions(f.produtos_fechados)}
+                    value={f.produtos_fechados}
+                    onChange={(v) => set("produtos_fechados", v)}
+                    placeholder="Selecione um ou mais"
+                    pluralLabel="serviços"
+                    invalid={Boolean(errors.produtos_fechados)}
+                  />
+                </Field>
+                {moneyField("valor_fechado", "Valor total fechado (R$)", "Alimenta o faturamento do dashboard.", "sm:col-span-2")}
+              </>
+            )}
+            <Input
+              label="Data de fechamento"
+              type="date"
+              value={f.data_fechamento || todayISO()}
+              onChange={(e) => set("data_fechamento", e.target.value)}
+            />
+          </div>
+        )}
+
+        {declinado && (
+          <div className="grid grid-cols-1 gap-4 rounded-[10px] border border-[#fecaca] bg-danger-soft/60 p-4">
+            <Field label="Motivos do declínio" required error={errors.motivos_declinio} htmlFor="motivos">
+              <MultiSelect
+                id="motivos"
+                options={MOTIVOS_DECLINIO}
+                value={f.motivos_declinio}
+                onChange={(v) => set("motivos_declinio", v)}
+                placeholder="Selecione um ou mais motivos"
+                invalid={Boolean(errors.motivos_declinio)}
+              />
+            </Field>
+            {f.motivos_declinio.includes("Outro") && (
+              <Input
+                label="Descreva o motivo"
+                required
+                value={f.motivo_declinio_outro}
+                onChange={(e) => set("motivo_declinio_outro", e.target.value)}
+                error={errors.motivo_declinio_outro}
+              />
+            )}
+            <p className="flex items-center gap-2 text-xs text-fg-2">
+              <RefreshCcw className="size-3.5" aria-hidden />
+              {giro && giro.status === "ativo"
+                ? `No Giro de Carteira — ${giro.etapa}º giro previsto para ${formatDate(giro.proxima_data)}.`
+                : `Ao salvar, o lead entra no Giro de Carteira com o 1º giro agendado para ${GIRO_INTERVALO_DIAS} dias.`}
+            </p>
+          </div>
+        )}
+      </>
+    );
+  };
 
   const observacaoEAnexos = (
     <>
       <Textarea
-        label={`Nova observação — ${STATUS_MAP[f.status].label}`}
+        label={`Nova observação — ${STATUS_MAP[statusPainel].label}`}
         value={f.observacao_etapa}
         onChange={(e) => set("observacao_etapa", e.target.value)}
         rows={4}
         placeholder="O que aconteceu neste contato? Necessidades do cliente, combinados, próximos passos..."
-        hint={
-          editing && !mudouEtapa
-            ? "Adiciona um novo registro à etapa atual, sem apagar os anteriores."
-            : "O registro fica na etapa correspondente da linha do tempo."
-        }
+        hint={editing ? "Adiciona um novo registro à etapa atual, sem apagar os anteriores." : "O registro fica na linha do tempo do atendimento."}
       />
       <Field label="Anexos">
         <AnexosPicker files={arquivos} onChange={setArquivos} onError={(m) => toast.error("Arquivo não adicionado.", m)} />
@@ -850,17 +982,17 @@ function AtendimentoFormInner({
     </>
   );
 
-  const rotuloPrincipal = !editing
-    ? "Registrar atendimento"
-    : acao === "declinar" && mudouEtapa
-      ? "Confirmar declínio"
-      : avancou
-        ? "Concluir e avançar"
-        : mudouEtapa
-          ? "Alterar etapa"
-          : temRegistro
-            ? "Adicionar registro"
-            : "Salvar alterações";
+  const alvoDialogo = mover?.alvo || null;
+  const tituloDialogo =
+    mover?.modo === "declinar"
+      ? "Declinar negócio"
+      : mover?.modo === "avancar" && alvoDialogo
+        ? `Avançar para ${STATUS_MAP[alvoDialogo].label}`
+        : statusOriginal === "negocio_declinado"
+          ? "Reabrir atendimento"
+          : "Mover para outra etapa";
+  const rotuloDialogo =
+    mover?.modo === "declinar" ? "Confirmar declínio" : mover?.modo === "avancar" ? "Confirmar e avançar" : "Mover para a etapa";
 
   return (
     <>
@@ -869,10 +1001,10 @@ function AtendimentoFormInner({
         variant="side"
         size="lg"
         onClose={onClose}
-        title={editing ? atendimento.lead : "Novo atendimento"}
+        title={editing ? atendimento!.lead : "Novo atendimento"}
         description={
           editing
-            ? `Registrado em ${formatDate(atendimento.data)} · ${vendedorNome(atendimento.responsavel_id ?? "")}`
+            ? `Registrado em ${formatDate(atendimento!.data)} · ${vendedorNome(atendimento!.responsavel_id ?? "")}`
             : "Preencha os dados do lead atendido."
         }
         footer={
@@ -888,11 +1020,11 @@ function AtendimentoFormInner({
               </Button>
             )}
             <Button variant="secondary" onClick={onClose}>
-              {verEtapa ? "Fechar" : "Cancelar"}
+              {editing ? "Fechar" : "Cancelar"}
             </Button>
             {!verEtapa && (
-              <Button onClick={save} loading={saving} variant={acao === "declinar" && mudouEtapa ? "danger" : "primary"}>
-                {rotuloPrincipal}
+              <Button onClick={() => salvar()} loading={saving && !mover}>
+                {!editing ? "Registrar atendimento" : temRegistro ? "Adicionar registro" : "Salvar"}
               </Button>
             )}
           </>
@@ -902,11 +1034,11 @@ function AtendimentoFormInner({
           className="space-y-6"
           onSubmit={(e) => {
             e.preventDefault();
-            if (!verEtapa) save();
+            if (!verEtapa) salvar();
           }}
         >
           {/* ESTEIRA: etapas alcançadas são clicáveis para consulta */}
-          {editing && (
+          {editing && atendimento && (
             <section className="rounded-[10px] border border-line bg-gray-50/60 px-3 pt-3 pb-2">
               <EtapasStepper
                 status={atendimento.status}
@@ -953,7 +1085,7 @@ function AtendimentoFormInner({
           </section>
 
           {/* CONSULTA DE ETAPA ANTERIOR  ×  ATUALIZAÇÃO */}
-          {editing && verEtapa ? (
+          {editing && atendimento && verEtapa ? (
             <EtapaDetalhe
               status={verEtapa}
               atendimento={atendimento}
@@ -965,83 +1097,45 @@ function AtendimentoFormInner({
               emAndamento={verEtapa === atendimento.status}
               onVoltar={() => setVerEtapa(null)}
             />
-          ) : editing ? (
+          ) : editing && atendimento ? (
             <section className="rounded-[12px] border border-line p-4 shadow-soft">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold text-fg">Registrar atualização</h3>
-                <span className="flex items-center gap-1.5 text-xs text-fg-2">
-                  Etapa atual: <StatusBadge status={atendimento.status} />
-                </span>
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold text-fg">Etapa atual</h3>
+                <StatusBadge status={atendimento.status} />
               </div>
-
-              <div role="radiogroup" aria-label="O que deseja fazer" className="mb-5 space-y-2">
-                <Opcao
-                  sel={acao === "manter"}
-                  onSelect={() => escolherAcao("manter")}
-                  titulo="Continuar nesta etapa"
-                  descricao="Adiciona um registro à etapa atual (ex.: mais uma ligação) ou atualiza informações."
-                  icone={<MessageSquarePlus className="size-4" />}
-                />
-                {proxima && (
-                  <Opcao
-                    sel={acao === "avancar"}
-                    onSelect={() => escolherAcao("avancar")}
-                    titulo={`Concluir etapa e avançar para ${proxima.label}`}
-                    descricao={
-                      atendimento.status === "qualificacao"
-                        ? "O checklist de qualificação precisa estar completo."
-                        : "Move o lead para a próxima etapa da esteira."
-                    }
-                    icone={<MoveRight className="size-4" />}
-                  />
-                )}
-                {statusOriginal !== "negocio_declinado" && statusOriginal !== "negocio_efetivado" && (
-                  <Opcao
-                    sel={acao === "declinar"}
-                    onSelect={() => escolherAcao("declinar")}
-                    titulo="Declinar negócio"
-                    descricao={`Encerra a negociação e envia o lead ao Giro de Carteira (retorno em ${GIRO_INTERVALO_DIAS} dias).`}
-                    icone={<Ban className="size-4" />}
-                    tom="danger"
-                  />
-                )}
-                <Opcao
-                  sel={acao === "outra"}
-                  onSelect={() => escolherAcao("outra")}
-                  titulo={statusOriginal === "negocio_declinado" ? "Reabrir em outra etapa" : "Mover para outra etapa"}
-                  descricao="Corrige a etapa do lead (voltar ou pular etapas)."
-                  icone={<History className="size-4" />}
-                >
-                  <Select
-                    aria-label="Etapa de destino"
-                    value={outraStatus}
-                    onChange={(e) => escolherOutra(e.target.value as StatusAtendimento | "")}
-                    placeholder="Selecione a etapa"
-                    options={STATUS.filter((s) => s.value !== statusOriginal).map((s) => ({ value: s.value, label: s.label }))}
-                    error={errors.status}
-                  />
-                </Opcao>
-              </div>
-
-              {mudouEtapa && statusOriginal && (
-                <p className="mb-4 flex flex-wrap items-center gap-2 rounded-md bg-accent-soft px-3 py-2 text-[13px] text-[#1d4ed8]">
-                  <StatusBadge status={statusOriginal} />
-                  <MoveRight className="size-3.5" aria-hidden />
-                  <StatusBadge status={f.status} />
-                  <span>Preencha o que a nova etapa pede e confirme no botão abaixo.</span>
-                </p>
-              )}
 
               <div className="space-y-4">
-                {camposEtapa}
+                {camposEtapa(atendimento.status)}
                 {observacaoEAnexos}
+                <p className="text-xs text-fg-3">
+                  <strong className="font-medium text-fg-2">Salvar</strong> registra dados e observações sem mudar a etapa.
+                </p>
               </div>
 
-              {!mudouEtapa && statusOriginal === "qualificacao" && checklistCompleto && (
-                <p className="mt-4 flex items-center gap-1.5 text-xs text-[#15803d]">
-                  <CheckCircle2 className="size-3.5" aria-hidden /> Checklist completo: o lead já pode avançar para a próxima etapa.
-                </p>
-              )}
+              {/* Mudança de etapa: cada botão grava na hora (após pedir o que a etapa exige) */}
+              <div className="mt-5 border-t border-line pt-4">
+                <p className="mb-2.5 text-xs font-semibold tracking-wide text-fg-2 uppercase">Mudar de etapa</p>
+                <div className="flex flex-wrap gap-2">
+                  {proxima && (
+                    <Button icon={<MoveRight className="size-4" />} onClick={() => iniciarMovimento("avancar", proxima.value)} loading={saving && !mover}>
+                      Concluir etapa e avançar para {proxima.label}
+                    </Button>
+                  )}
+                  {podeDeclinar && (
+                    <Button
+                      variant="secondary"
+                      className="border-[#fecaca] text-danger hover:bg-danger-soft"
+                      icon={<Ban className="size-4" />}
+                      onClick={() => iniciarMovimento("declinar", "negocio_declinado")}
+                    >
+                      Declinar negócio
+                    </Button>
+                  )}
+                  <Button variant="ghost" icon={<Shuffle className="size-4" />} onClick={() => iniciarMovimento("mover", "")}>
+                    {atendimento.status === "negocio_declinado" ? "Reabrir em outra etapa" : "Mover para outra etapa"}
+                  </Button>
+                </div>
+              </div>
             </section>
           ) : (
             <section className="border-t border-line pt-5">
@@ -1051,11 +1145,14 @@ function AtendimentoFormInner({
                   label="Status"
                   required
                   value={f.status}
-                  onChange={(e) => onStatusInicial(e.target.value as StatusAtendimento)}
+                  onChange={(e) => {
+                    set("status", e.target.value as StatusAtendimento);
+                    setChkErros({});
+                  }}
                   options={STATUS.map((s) => ({ value: s.value, label: s.label }))}
                   wrapperClassName="max-w-xs"
                 />
-                {camposEtapa}
+                {camposEtapa(f.status)}
                 {observacaoEAnexos}
               </div>
             </section>
@@ -1081,6 +1178,58 @@ function AtendimentoFormInner({
         </form>
       </Modal>
 
+      {/* Janela da mudança de etapa: pede só o que a etapa de destino exige e grava */}
+      <Modal
+        open={mover !== null}
+        onClose={cancelarMovimento}
+        title={tituloDialogo}
+        description={
+          atendimento && alvoDialogo
+            ? `${STATUS_MAP[atendimento.status].label} → ${STATUS_MAP[alvoDialogo].label}`
+            : "Escolha a etapa de destino do lead."
+        }
+        size="lg"
+        footer={
+          <>
+            <Button variant="secondary" onClick={cancelarMovimento} disabled={saving}>
+              Cancelar
+            </Button>
+            <Button onClick={confirmarMovimento} loading={saving} variant={mover?.modo === "declinar" ? "danger" : "primary"}>
+              {rotuloDialogo}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          {mover?.modo === "mover" && (
+            <Select
+              label="Etapa de destino"
+              required
+              value={mover.alvo}
+              onChange={(e) => {
+                setErroAlvo("");
+                setErrors({});
+                setChkErros({});
+                setMover({ modo: "mover", alvo: e.target.value as StatusAtendimento | "" });
+              }}
+              placeholder="Selecione a etapa"
+              options={STATUS.filter((s) => s.value !== statusOriginal).map((s) => ({ value: s.value, label: s.label }))}
+              error={erroAlvo}
+            />
+          )}
+          {alvoDialogo && camposEtapa(alvoDialogo)}
+          {alvoDialogo && (
+            <Textarea
+              label="Observação (opcional)"
+              value={obsDestino}
+              onChange={(e) => setObsDestino(e.target.value)}
+              rows={3}
+              placeholder={`Registro inicial da etapa ${STATUS_MAP[alvoDialogo].label}`}
+            />
+          )}
+        </div>
+      </Modal>
+
       <ConfirmDialog
         open={notaExcluir !== null}
         title="Excluir registro?"
@@ -1097,52 +1246,6 @@ function AtendimentoFormInner({
         onClose={() => setConfirmDelete(false)}
       />
     </>
-  );
-}
-
-/** Opção do seletor "o que deseja fazer" (uma única ação de salvar no rodapé). */
-function Opcao({
-  sel,
-  onSelect,
-  titulo,
-  descricao,
-  icone,
-  tom = "default",
-  children,
-}: {
-  sel: boolean;
-  onSelect: () => void;
-  titulo: string;
-  descricao: string;
-  icone: React.ReactNode;
-  tom?: "default" | "danger";
-  children?: React.ReactNode;
-}) {
-  return (
-    <div
-      className={`rounded-md border p-3 transition-colors ${
-        sel
-          ? tom === "danger"
-            ? "border-danger bg-danger-soft/60"
-            : "border-accent bg-accent-soft/50"
-          : "border-line bg-surface hover:bg-gray-50"
-      }`}
-    >
-      <button type="button" role="radio" aria-checked={sel} onClick={onSelect} className="flex w-full items-start gap-3 text-left">
-        <span
-          className={`mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md ${
-            sel ? (tom === "danger" ? "bg-danger text-white" : "bg-accent text-white") : "bg-gray-100 text-fg-2"
-          }`}
-        >
-          {icone}
-        </span>
-        <span className="min-w-0">
-          <span className="block text-sm font-medium text-fg">{titulo}</span>
-          <span className="block text-xs text-fg-2">{descricao}</span>
-        </span>
-      </button>
-      {sel && children && <div className="mt-3 pl-11">{children}</div>}
-    </div>
   );
 }
 

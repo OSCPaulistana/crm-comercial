@@ -49,7 +49,7 @@ export type AtendimentoResumo = Pick<
   | "etapa_maxima"
   | "data_visita"
   | "proposta_valor"
-  | "produto_id"
+  | "produtos_fechados"
   | "valor_fechado"
   | "data_fechamento"
   | "data_declinio"
@@ -252,14 +252,18 @@ export function DashboardView({
     const fatProduto = new Map<string, number>();
     const fatProdutoMes = new Map<string, number[]>();
     for (const a of efetivados) {
-      const pid = a.produto_id && produtoInfo.has(a.produto_id) ? a.produto_id : SEM_PRODUTO;
-      const v = Number(a.valor_fechado ?? 0);
-      fatProduto.set(pid, (fatProduto.get(pid) ?? 0) + v);
+      // negócio com mais de um serviço: o valor é dividido igualmente entre eles
+      const ids = (a.produtos_fechados ?? []).filter((id) => produtoInfo.has(id));
+      const alvos = ids.length ? ids : [SEM_PRODUTO];
+      const parte = Number(a.valor_fechado ?? 0) / alvos.length;
       const i = idx.get(mesKey(a.data_fechamento!));
-      if (i === undefined) continue;
-      const serie = fatProdutoMes.get(pid) ?? buckets.map(() => 0);
-      serie[i] += v;
-      fatProdutoMes.set(pid, serie);
+      for (const pid of alvos) {
+        fatProduto.set(pid, (fatProduto.get(pid) ?? 0) + parte);
+        if (i === undefined) continue;
+        const serie = fatProdutoMes.get(pid) ?? buckets.map(() => 0);
+        serie[i] += parte;
+        fatProdutoMes.set(pid, serie);
+      }
     }
     const porProduto = [...fatProduto.entries()]
       .filter(([, v]) => v > 0)
