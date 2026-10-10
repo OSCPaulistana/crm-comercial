@@ -52,6 +52,8 @@ export const STATUS_EM_ANDAMENTO: StatusAtendimento[] = [
 ];
 
 /** Etapas do funil (usadas com etapa_maxima do atendimento). */
+export const ETAPA_QUALIFICACAO = 2;
+/** A partir daqui (agendar visita em diante) o checklist de qualificação é obrigatório. */
 export const ETAPA_AGENDADO = 3;
 export const ETAPA_VISITA = 4;
 export const ETAPA_FECHADO = 6;
@@ -84,6 +86,9 @@ export const MESES_LONGOS = [
 
 export const MEIOS_CONTATO = ["WhatsApp", "Ligação", "E-mail", "Presencial"] as const;
 export type MeioContato = (typeof MEIOS_CONTATO)[number];
+
+export const TIPOS_VISITA = ["Visita", "Reunião no escritório"] as const;
+export type TipoVisita = (typeof TIPOS_VISITA)[number];
 
 export const GIRO_ETAPAS = [1, 2, 3, 4] as const;
 export const GIRO_INTERVALO_DIAS = 60;

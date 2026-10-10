@@ -42,15 +42,19 @@ begin
     v_canal := (array['Indicação','Captação','Redes Sociais','Alex'])[1 + floor(random() * 4)::int];
 
     insert into public.atendimentos (
-      data, lead, porte, regime, canal, indicado_por, uf, municipio, status, responsavel_id,
-      data_visita, proposta_produto_id, proposta_valor, produto_id, valor_fechado, data_fechamento,
-      motivos_declinio, data_declinio, observacao_etapa
+      data, lead, porte, regime, canal, meio_contato_inicial, indicado_por, uf, municipio, status, responsavel_id,
+      data_visita, tipo_visita,
+      qualif_atividade, qualif_outras_empresas, qualif_funcionarios, qualif_faturamento_mensal,
+      qualif_contabilidade_anterior, qualif_principal_dor, qualif_produtos,
+      proposta_produto_id, proposta_valor, produto_id, valor_fechado, data_fechamento,
+      motivos_declinio, data_declinio
     ) values (
       v_data,
       'Cliente Demo ' || lpad(i::text, 3, '0'),
       (array['MEI','ME','EPP','DEMAIS'])[1 + floor(random() * 4)::int],
       (array['MEI','Simples Nacional','Lucro Presumido','Lucro Real'])[1 + floor(random() * 4)::int],
       v_canal,
+      (array['WhatsApp','Ligação','E-mail','Presencial'])[1 + floor(random() * 4)::int],
       case when v_canal = 'Indicação'
            then (array['Carlos Mendes','Ana Ribeiro','Escritório Parceiro XP','Marcos Lima'])[1 + floor(random() * 4)::int] end,
       'SP',
@@ -59,6 +63,15 @@ begin
       v_vend,
       case when v_status in ('agendado_visita','visita_realizada','proposta_enviada','negocio_efetivado')
            then least(v_data + 7, current_date) end,
+      case when v_status = 'visita_realizada' then (array['Visita','Reunião no escritório'])[1 + floor(random() * 2)::int] end,
+      -- checklist de qualificação (obrigatório a partir de "Agendado Visita")
+      'Atividade demonstrativa',
+      random() < 0.3,
+      floor(random() * 40)::int,
+      round((5000 + random() * 95000)::numeric, 2),
+      'Contabilidade anterior demo',
+      'Principal dor informada na qualificação (demonstração).',
+      array[v_prod],
       case when v_status in ('proposta_enviada','negocio_efetivado') then v_prod end,
       case when v_status in ('proposta_enviada','negocio_efetivado') then round((400 + random() * 3600)::numeric, 2) end,
       case when v_status = 'negocio_efetivado' then v_prod end,
@@ -67,8 +80,7 @@ begin
       case when v_status = 'negocio_declinado'
            then array[(array['Honorários','Trava contratual com a contabilidade atual','Outro'])[1 + floor(random() * 3)::int]]
            else '{}' end,
-      case when v_status = 'negocio_declinado' then least(v_data + 10, current_date) end,
-      'Registro gerado para demonstração.'
+      case when v_status = 'negocio_declinado' then least(v_data + 10, current_date) end
     );
   end loop;
 end;

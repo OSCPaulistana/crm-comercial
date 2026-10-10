@@ -173,13 +173,13 @@ export function ContatosPorMeioChart({ data }: { data: { meio: string; total: nu
   if (total === 0) {
     return (
       <div className="flex h-[280px] items-center justify-center px-6 text-center text-sm text-fg-3">
-        Nenhum contato com meio registrado no período.
+        Nenhum atendimento com meio de contato registrado no período.
       </div>
     );
   }
   const rows = data.map((d) => ({ ...d, labelLongo: d.meio }));
   return (
-    <div style={{ height: HEIGHT }} role="img" aria-label="Gráfico de barras: quantidade de contatos por meio de contato">
+    <div style={{ height: HEIGHT }} role="img" aria-label="Gráfico de barras: atendimentos por meio do primeiro contato">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={rows} margin={{ top: 20, right: 8, left: -12, bottom: 0 }} barCategoryGap="30%">
           <CartesianGrid vertical={false} stroke={GRID} />
@@ -194,7 +194,7 @@ export function ContatosPorMeioChart({ data }: { data: { meio: string; total: nu
                 <div className="rounded-md border border-line bg-surface px-3 py-2 text-xs shadow-pop">
                   <p className="font-semibold text-fg">{p.meio}</p>
                   <p className="mt-1 text-fg-2 tabular-nums">
-                    {formatNumber(p.total)} contato{p.total === 1 ? "" : "s"} · {formatPercent(p.total / total)} do total
+                    {formatNumber(p.total)} atendimento{p.total === 1 ? "" : "s"} · {formatPercent(p.total / total)} do total
                   </p>
                 </div>
               );

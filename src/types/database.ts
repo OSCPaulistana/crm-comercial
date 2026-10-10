@@ -1,4 +1,13 @@
-import type { Canal, MeioContato, Perfil, Porte, Recorrencia, Regime, StatusAtendimento } from "@/lib/constants";
+import type {
+  Canal,
+  MeioContato,
+  Perfil,
+  Porte,
+  Recorrencia,
+  Regime,
+  StatusAtendimento,
+  TipoVisita,
+} from "@/lib/constants";
 
 export interface Profile {
   id: string;
@@ -76,11 +85,18 @@ export interface Atendimento {
   campanha_id: string | null;
   /** Observações gerais (legado — hoje as observações são por etapa). */
   observacoes: string | null;
-  /** Observação da etapa atual (também gravada no histórico). */
-  observacao_etapa: string | null;
-  /** Meio de contato da etapa atual (também gravado no histórico). */
-  meio_contato_etapa: MeioContato | null;
+  /** Meio de contato do primeiro contato (informado no registro do lead). */
+  meio_contato_inicial: MeioContato | null;
   data_visita: string | null;
+  tipo_visita: TipoVisita | null;
+  // Checklist de qualificação
+  qualif_atividade: string | null;
+  qualif_outras_empresas: boolean | null;
+  qualif_funcionarios: number | null;
+  qualif_faturamento_mensal: number | null;
+  qualif_contabilidade_anterior: string | null;
+  qualif_principal_dor: string | null;
+  qualif_produtos: string[];
   proposta_produto_id: string | null;
   proposta_valor: number | null;
   data_proposta: string | null;

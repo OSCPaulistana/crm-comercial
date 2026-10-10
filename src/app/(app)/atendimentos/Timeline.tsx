@@ -50,15 +50,23 @@ const TONE_DOT: Record<Tone, string> = {
   danger: "bg-danger",
 };
 
-/** Trilha horizontal das etapas do funil (concluídas, atual e próximas). */
+/**
+ * Trilha horizontal das etapas do funil (concluídas, atual e próximas).
+ * Etapas já alcançadas são clicáveis para consultar o que foi preenchido nelas.
+ */
 export function EtapasStepper({
   status,
   etapaMaxima,
   historico,
+  selecionada,
+  onSelecionar,
 }: {
   status: StatusAtendimento;
   etapaMaxima: number;
   historico: HistoricoRow[];
+  /** Etapa que está sendo consultada (null = nenhuma, mostrando a etapa atual). */
+  selecionada: StatusAtendimento | null;
+  onSelecionar: (s: StatusAtendimento) => void;
 }) {
   const declinado = status === "negocio_declinado";
   const etapaAtual = STATUS_MAP[status].etapa;
@@ -68,50 +76,71 @@ export function EtapasStepper({
 
   return (
     <div className="-mx-1 overflow-x-auto px-1 pb-1">
-      <ol className="flex min-w-[560px] items-start" aria-label="Etapas do atendimento">
+      <ol className="flex min-w-[600px] items-start" aria-label="Etapas do atendimento">
         {ETAPAS_FUNIL.map((s, i) => {
           const concluida = declinado ? s.etapa <= etapaMaxima : s.etapa < etapaAtual;
           const atual = !declinado && s.etapa === etapaAtual;
+          const alcancada = concluida || atual;
           const data = dataDe.get(s.value);
+          const sel = selecionada === s.value;
           return (
             <li key={s.value} className="relative flex flex-1 flex-col items-center text-center">
               {i > 0 && (
                 <span
-                  className={`absolute top-3.5 right-1/2 h-0.5 w-full -translate-y-1/2 ${
-                    concluida || atual ? "bg-accent" : "bg-line"
-                  }`}
+                  className={`absolute top-[26px] right-1/2 h-0.5 w-full -translate-y-1/2 ${alcancada ? "bg-accent" : "bg-line"}`}
                   aria-hidden
                 />
               )}
-              <span
-                className={`relative z-10 flex size-7 items-center justify-center rounded-full border-2 text-xs font-semibold ${
-                  concluida
-                    ? "border-accent bg-accent text-white"
-                    : atual
-                      ? "border-accent bg-surface text-accent ring-4 ring-accent/15"
-                      : "border-line-strong bg-surface text-fg-3"
-                }`}
+              <button
+                type="button"
+                disabled={!alcancada}
+                onClick={() => onSelecionar(s.value)}
+                aria-pressed={sel}
                 aria-current={atual ? "step" : undefined}
+                title={alcancada ? (atual ? "Etapa atual" : "Ver o que foi preenchido nesta etapa") : "Etapa ainda não alcançada"}
+                className={`relative z-10 flex w-full flex-col items-center rounded-md px-1 py-2 transition-colors ${
+                  alcancada ? "cursor-pointer hover:bg-white" : "cursor-default"
+                } ${sel ? "bg-white shadow-soft ring-1 ring-accent/40" : ""}`}
               >
-                {concluida ? <Check className="size-3.5" strokeWidth={3} /> : i + 1}
-              </span>
-              <span className={`mt-1.5 px-1 text-[11px] leading-tight ${atual ? "font-semibold text-fg" : concluida ? "text-fg" : "text-fg-3"}`}>
-                {s.label}
-              </span>
-              {data && (concluida || atual) && <span className="text-[10px] text-fg-3 tabular-nums">{formatDate(data)}</span>}
+                <span
+                  className={`flex size-7 items-center justify-center rounded-full border-2 text-xs font-semibold ${
+                    concluida
+                      ? "border-accent bg-accent text-white"
+                      : atual
+                        ? "border-accent bg-surface text-accent ring-4 ring-accent/15"
+                        : "border-line-strong bg-surface text-fg-3"
+                  }`}
+                >
+                  {concluida ? <Check className="size-3.5" strokeWidth={3} /> : i + 1}
+                </span>
+                <span className={`mt-1.5 px-1 text-[11px] leading-tight ${atual ? "font-semibold text-fg" : concluida ? "text-fg" : "text-fg-3"}`}>
+                  {s.label}
+                </span>
+                {data && alcancada && <span className="text-[10px] text-fg-3 tabular-nums">{formatDate(data)}</span>}
+              </button>
             </li>
           );
         })}
         {declinado && (
           <li className="relative flex flex-1 flex-col items-center text-center">
-            <span className="absolute top-3.5 right-1/2 h-0.5 w-full -translate-y-1/2 border-t-2 border-dashed border-danger/60" aria-hidden />
-            <span className="relative z-10 flex size-7 items-center justify-center rounded-full border-2 border-danger bg-danger text-white ring-4 ring-danger/15">
-              <X className="size-3.5" strokeWidth={3} />
-            </span>
-            <span className="mt-1.5 text-[11px] leading-tight font-semibold text-danger">Declinado</span>
-            {dataDe.get("negocio_declinado") && (
-              <span className="text-[10px] text-fg-3 tabular-nums">{formatDate(dataDe.get("negocio_declinado"))}</span>
-            )}
+            <span className="absolute top-[26px] right-1/2 h-0.5 w-full -translate-y-1/2 border-t-2 border-dashed border-danger/60" aria-hidden />
+            <button
+              type="button"
+              onClick={() => onSelecionar("negocio_declinado")}
+              aria-pressed={selecionada === "negocio_declinado"}
+              title="Ver o motivo do declínio"
+              className={`relative z-10 flex w-full cursor-pointer flex-col items-center rounded-md px-1 py-2 transition-colors hover:bg-white ${
+                selecionada === "negocio_declinado" ? "bg-white shadow-soft ring-1 ring-danger/40" : ""
+              }`}
+            >
+              <span className="flex size-7 items-center justify-center rounded-full border-2 border-danger bg-danger text-white ring-4 ring-danger/15">
+                <X className="size-3.5" strokeWidth={3} />
+              </span>
+              <span className="mt-1.5 text-[11px] leading-tight font-semibold text-danger">Declinado</span>
+              {dataDe.get("negocio_declinado") && (
+                <span className="text-[10px] text-fg-3 tabular-nums">{formatDate(dataDe.get("negocio_declinado"))}</span>
+              )}
+            </button>
           </li>
         )}
       </ol>
@@ -330,6 +359,52 @@ export function AnexosPicker({
   );
 }
 
+/** Um registro (observação) da etapa: meio de contato, texto e anexos. */
+export function RegistroCard({
+  nota,
+  anexos,
+  links,
+  podeExcluir,
+  onExcluir,
+}: {
+  nota: NotaRow;
+  anexos: Anexo[];
+  links: Record<string, string>;
+  podeExcluir?: boolean;
+  onExcluir?: (n: NotaRow) => void;
+}) {
+  return (
+    <li className="group rounded-md border border-line bg-gray-50/70 px-3 py-2.5">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <MeioBadge meio={nota.meio_contato} />
+        <span className="text-xs text-fg-2">
+          {formatDateTime(nota.created_at)}
+          {nota.profiles?.nome ? ` · ${nota.profiles.nome}` : ""}
+        </span>
+        {podeExcluir && onExcluir && (
+          <button
+            type="button"
+            onClick={() => onExcluir(nota)}
+            aria-label="Excluir registro"
+            title="Excluir registro"
+            className="ml-auto rounded p-1 text-fg-3 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-danger-soft hover:text-danger focus:opacity-100"
+          >
+            <Trash2 className="size-3.5" />
+          </button>
+        )}
+      </div>
+      {nota.texto && <p className="mt-1.5 text-[13px] whitespace-pre-line text-fg">{nota.texto}</p>}
+      {anexos.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {anexos.map((a) => (
+            <AnexoView key={a.id} anexo={a} url={links[a.path]} />
+          ))}
+        </div>
+      )}
+    </li>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /* Linha do tempo                                                      */
 /* ------------------------------------------------------------------ */
@@ -396,39 +471,16 @@ export function TimelineList({
                 <p className="mt-1.5 text-xs text-fg-3">Sem registros nesta etapa.</p>
               ) : (
                 <ul className="mt-2.5 space-y-2">
-                  {registros.map((n) => {
-                    const arquivos = anexosPorNota.get(n.id) ?? [];
-                    return (
-                      <li key={n.id} className="group rounded-md border border-line bg-gray-50/70 px-3 py-2.5">
-                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                          <MeioBadge meio={n.meio_contato} />
-                          <span className="text-xs text-fg-2">
-                            {formatDateTime(n.created_at)}
-                            {n.profiles?.nome ? ` · ${n.profiles.nome}` : ""}
-                          </span>
-                          {podeExcluirNota?.(n) && onExcluirNota && (
-                            <button
-                              type="button"
-                              onClick={() => onExcluirNota(n)}
-                              aria-label="Excluir registro"
-                              title="Excluir registro"
-                              className="ml-auto rounded p-1 text-fg-3 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-danger-soft hover:text-danger focus:opacity-100"
-                            >
-                              <Trash2 className="size-3.5" />
-                            </button>
-                          )}
-                        </div>
-                        {n.texto && <p className="mt-1.5 text-[13px] whitespace-pre-line text-fg">{n.texto}</p>}
-                        {arquivos.length > 0 && (
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            {arquivos.map((a) => (
-                              <AnexoView key={a.id} anexo={a} url={links[a.path]} />
-                            ))}
-                          </div>
-                        )}
-                      </li>
-                    );
-                  })}
+                  {registros.map((n) => (
+                    <RegistroCard
+                      key={n.id}
+                      nota={n}
+                      anexos={anexosPorNota.get(n.id) ?? []}
+                      links={links}
+                      podeExcluir={podeExcluirNota?.(n)}
+                      onExcluir={onExcluirNota}
+                    />
+                  ))}
                 </ul>
               )}
             </div>

@@ -17,7 +17,7 @@ export default async function GiroPage() {
       supabase
         .from("giro_carteira")
         .select(
-          "id, atendimento_id, etapa, proxima_data, status, updated_at, atendimento:atendimentos(id, lead, telefone, email, porte, regime, canal, responsavel_id, motivos_declinio, motivo_declinio_outro, data_declinio, observacoes, observacao_etapa)",
+          "id, atendimento_id, etapa, proxima_data, status, updated_at, atendimento:atendimentos(id, lead, telefone, email, porte, regime, canal, responsavel_id, motivos_declinio, motivo_declinio_outro, data_declinio, observacoes)",
         )
         .eq("status", "ativo")
         .order("proxima_data")

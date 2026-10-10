@@ -16,7 +16,6 @@ export type GiroCard = GiroCarteira & {
     | "motivo_declinio_outro"
     | "data_declinio"
     | "observacoes"
-    | "observacao_etapa"
   >;
 };
 

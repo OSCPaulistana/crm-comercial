@@ -39,6 +39,7 @@ export type AtendimentoResumo = Pick<
   | "id"
   | "data"
   | "canal"
+  | "meio_contato_inicial"
   | "indicado_por"
   | "uf"
   | "municipio"
@@ -54,20 +55,7 @@ export type AtendimentoResumo = Pick<
   | "data_declinio"
 >;
 
-export interface ContatoRegistrado {
-  atendimento_id: string;
-  meio_contato: MeioContato;
-  created_at: string;
-}
-
-/** Timestamp (UTC) → data local AAAA-MM-DD. */
-const dataLocal = (ts: string) => {
-  const d = new Date(ts);
-  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
-};
-
 interface Props {
-  contatos: ContatoRegistrado[];
   atendimentos: AtendimentoResumo[];
   metas: Meta[];
   vendedores: Vendedor[];
@@ -135,7 +123,6 @@ function mesesEntre(ini: string, fim: string) {
 
 export function DashboardView({
   atendimentos,
-  contatos,
   metas,
   vendedores,
   campanhas,
@@ -307,14 +294,13 @@ export function DashboardView({
       .filter((v) => v.faturamento > 0 || v.meta > 0)
       .sort((a, b) => b.faturamento - a.faturamento || b.meta - a.meta);
 
-    // 9) Contatos realizados por meio (atualizações da linha do tempo no período)
-    const idsFiltrados = new Set(rows.map((a) => a.id));
+    // 9) Meio do PRIMEIRO contato (informado no registro do lead), por atendimento do período
     const porMeio = new Map<MeioContato, number>(MEIOS_CONTATO.map((m) => [m, 0]));
-    for (const c of contatos) {
-      if (!idsFiltrados.has(c.atendimento_id) || !noPeriodo(dataLocal(c.created_at))) continue;
-      porMeio.set(c.meio_contato, (porMeio.get(c.meio_contato) ?? 0) + 1);
+    for (const a of registrados) {
+      if (a.meio_contato_inicial) porMeio.set(a.meio_contato_inicial, (porMeio.get(a.meio_contato_inicial) ?? 0) + 1);
     }
     const contatosPorMeio = MEIOS_CONTATO.map((m) => ({ meio: m, total: porMeio.get(m) ?? 0 }));
+    const semMeio = registrados.filter((a) => !a.meio_contato_inicial).length;
 
     // Projeção: valor das propostas enviadas ainda em aberto
     const propostas = registrados.filter((a) => a.status === "proposta_enviada");
@@ -337,11 +323,12 @@ export function DashboardView({
       fatProdutoSerie,
       porVendedor,
       contatosPorMeio,
+      semMeio,
       funil,
       indicadores,
       porCampanha: porCampanhaList,
     };
-  }, [atendimentos, contatos, metas, vendedores, vendedoresSel, municipiosSel, ini, fim, campanhaNome, produtoInfo]);
+  }, [atendimentos, metas, vendedores, vendedoresSel, municipiosSel, ini, fim, campanhaNome, produtoInfo]);
 
   const filtrosAtivos =
     vendedoresSel.length > 0 ||
@@ -503,7 +490,14 @@ export function DashboardView({
         <ChartCard title="Visitas / reuniões efetivadas" subtitle="Quantidade por mês da visita">
           <VisitasChart data={d.visitas} />
         </ChartCard>
-        <ChartCard title="Contatos realizados por meio" subtitle="Atualizações registradas no período, por meio de contato utilizado">
+        <ChartCard
+          title="Meio do primeiro contato"
+          subtitle={
+            d.semMeio > 0
+              ? `Atendimentos registrados no período, por meio do 1º contato · ${formatNumber(d.semMeio)} sem meio informado`
+              : "Atendimentos registrados no período, por meio do 1º contato"
+          }
+        >
           <ContatosPorMeioChart data={d.contatosPorMeio} />
         </ChartCard>
         <ChartCard title="Funil de vendas" subtitle="Atendimentos registrados no período" className="xl:col-span-2">
