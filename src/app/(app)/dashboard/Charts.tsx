@@ -80,7 +80,7 @@ const tip = (fmt: Fmt) =>
 
 export function AgendadosPorCanalChart({ data }: { data: MesPonto[] }) {
   return (
-    <div style={{ height: HEIGHT + 30 }} role="img" aria-label="Gráfico de barras: visitas agendadas por mês e canal de prospecção">
+    <div style={{ height: HEIGHT + 30 }} role="img" aria-label="Gráfico de barras: origem dos leads (visitas agendadas por mês e canal de prospecção)">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} margin={{ top: 8, right: 8, left: -12, bottom: 0 }} barCategoryGap="18%" barGap={2}>
           <CartesianGrid vertical={false} stroke={GRID} />
@@ -179,7 +179,7 @@ export function ContatosPorMeioChart({ data }: { data: { meio: string; total: nu
   }
   const rows = data.map((d) => ({ ...d, labelLongo: d.meio }));
   return (
-    <div style={{ height: HEIGHT }} role="img" aria-label="Gráfico de barras: atendimentos por meio do primeiro contato">
+    <div style={{ height: HEIGHT }} role="img" aria-label="Gráfico de barras: canal do primeiro contato">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={rows} margin={{ top: 20, right: 8, left: -12, bottom: 0 }} barCategoryGap="30%">
           <CartesianGrid vertical={false} stroke={GRID} />

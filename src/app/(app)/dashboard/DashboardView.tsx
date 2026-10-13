@@ -485,7 +485,7 @@ export function DashboardView({
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <ChartCard
-          title="Visitas agendadas por canal de 1º contato"
+          title="Origem de Leads"
           subtitle="Atendimentos que chegaram a visita agendada, por mês de registro"
           className="xl:col-span-2"
         >
@@ -495,7 +495,7 @@ export function DashboardView({
           <VisitasChart data={d.visitas} />
         </ChartCard>
         <ChartCard
-          title="Meio do primeiro contato"
+          title="Canal do Primeiro Contato"
           subtitle={
             d.semMeio > 0
               ? `Atendimentos registrados no período, por meio do 1º contato · ${formatNumber(d.semMeio)} sem meio informado`
