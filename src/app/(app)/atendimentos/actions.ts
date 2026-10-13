@@ -59,46 +59,116 @@ function regimeDe(d: BrasilApiCnpj): DadosCnpj["regime"] {
   return "";
 }
 
-/** Consulta o CNPJ na base pública da Receita Federal (via BrasilAPI). */
+/** A BrasilAPI (Cloudflare) recusa com 403 requisições sem User-Agent, como as do servidor. */
+const HEADERS = { Accept: "application/json", "User-Agent": "CRM-OSC-Paulistana/1.0 (+https://crm-comercial-xi.vercel.app)" };
+
+type Falha = "nao_encontrado" | "limite" | "indisponivel";
+
+async function buscar(url: string): Promise<{ json: unknown } | { falha: Falha }> {
+  let r: Response;
+  try {
+    r = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(12000), headers: HEADERS });
+  } catch {
+    return { falha: "indisponivel" };
+  }
+  if (r.status === 404) return { falha: "nao_encontrado" };
+  if (r.status === 429) return { falha: "limite" };
+  if (!r.ok) return { falha: "indisponivel" };
+  try {
+    return { json: await r.json() };
+  } catch {
+    return { falha: "indisponivel" };
+  }
+}
+
+function dadosBrasilApi(d: BrasilApiCnpj): DadosCnpj {
+  const telefone = (d.ddd_telefone_1 ?? "").replace(/\D/g, "");
+  return {
+    cnpj: d.cnpj,
+    razaoSocial: (d.razao_social ?? "").trim(),
+    nomeFantasia: (d.nome_fantasia ?? "").trim(),
+    situacao: (d.descricao_situacao_cadastral ?? "").trim(),
+    atividade: (d.cnae_fiscal_descricao ?? "").trim(),
+    porte: porteDe(d),
+    regime: regimeDe(d),
+    uf: (d.uf ?? "").toUpperCase(),
+    municipio: (d.municipio ?? "").trim(),
+    municipioIbge: d.codigo_municipio_ibge ?? null,
+    telefone: telefone.length >= 10 ? telefone : "",
+    email: (d.email ?? "").trim().toLowerCase(),
+  };
+}
+
+/** Alternativa (CNPJ.ws, base pública da Receita) para quando a BrasilAPI falhar. */
+interface CnpjWs {
+  razao_social?: string;
+  porte?: { descricao?: string } | null;
+  simples?: { simples?: string | null; mei?: string | null } | null;
+  estabelecimento?: {
+    cnpj?: string;
+    nome_fantasia?: string | null;
+    situacao_cadastral?: string | null;
+    atividade_principal?: { descricao?: string } | null;
+    estado?: { sigla?: string } | null;
+    cidade?: { nome?: string; ibge_id?: number } | null;
+    ddd1?: string | null;
+    telefone1?: string | null;
+    email?: string | null;
+  } | null;
+}
+
+function dadosCnpjWs(d: CnpjWs, digitos: string): DadosCnpj {
+  const e = d.estabelecimento ?? {};
+  const mei = d.simples?.mei === "Sim";
+  const simples = d.simples?.simples === "Sim";
+  const p = (d.porte?.descricao ?? "").toUpperCase();
+  const porte: DadosCnpj["porte"] = mei
+    ? "MEI"
+    : p.includes("MICRO")
+      ? "ME"
+      : p.includes("PEQUENO")
+        ? "EPP"
+        : p === "DEMAIS"
+          ? "DEMAIS"
+          : "";
+  const telefone = `${e.ddd1 ?? ""}${e.telefone1 ?? ""}`.replace(/\D/g, "");
+  return {
+    cnpj: digitos,
+    razaoSocial: (d.razao_social ?? "").trim(),
+    nomeFantasia: (e.nome_fantasia ?? "").trim(),
+    situacao: (e.situacao_cadastral ?? "").trim(),
+    atividade: (e.atividade_principal?.descricao ?? "").trim(),
+    porte,
+    regime: mei ? "MEI" : simples ? "Simples Nacional" : "",
+    uf: (e.estado?.sigla ?? "").toUpperCase(),
+    municipio: (e.cidade?.nome ?? "").trim(),
+    municipioIbge: e.cidade?.ibge_id ?? null,
+    telefone: telefone.length >= 10 ? telefone : "",
+    email: (e.email ?? "").trim().toLowerCase(),
+  };
+}
+
+/** Consulta o CNPJ na base pública da Receita Federal (BrasilAPI; se falhar, CNPJ.ws). */
 export async function consultarCnpj(cnpj: string): Promise<ResultadoCnpj> {
   await requirePerfil();
 
   const digitos = (cnpj ?? "").replace(/\D/g, "");
   if (!cnpjValido(digitos)) return { ok: false, error: "CNPJ inválido. Confira os números digitados." };
 
-  let r: Response;
-  try {
-    r = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${digitos}`, {
-      cache: "no-store",
-      signal: AbortSignal.timeout(12000),
-      headers: { Accept: "application/json" },
-    });
-  } catch {
-    return { ok: false, error: "Não foi possível consultar a Receita Federal agora. Preencha os dados manualmente." };
-  }
+  const principal = await buscar(`https://brasilapi.com.br/api/cnpj/v1/${digitos}`);
+  if ("json" in principal) return { ok: true, dados: dadosBrasilApi(principal.json as BrasilApiCnpj) };
+  if (principal.falha === "nao_encontrado") return { ok: false, error: "CNPJ não encontrado na Receita Federal." };
 
-  if (r.status === 404) return { ok: false, error: "CNPJ não encontrado na Receita Federal." };
-  if (r.status === 429) return { ok: false, error: "Muitas consultas seguidas. Aguarde um minuto e tente novamente." };
-  if (!r.ok) return { ok: false, error: "A consulta à Receita Federal está indisponível. Preencha os dados manualmente." };
+  const reserva = await buscar(`https://publica.cnpj.ws/cnpj/${digitos}`);
+  if ("json" in reserva) return { ok: true, dados: dadosCnpjWs(reserva.json as CnpjWs, digitos) };
+  if (reserva.falha === "nao_encontrado") return { ok: false, error: "CNPJ não encontrado na Receita Federal." };
 
-  const d = (await r.json()) as BrasilApiCnpj;
-  const telefone = (d.ddd_telefone_1 ?? "").replace(/\D/g, "");
-
+  console.error("consultarCnpj: falha nas duas fontes", { brasilapi: principal.falha, cnpjws: reserva.falha });
   return {
-    ok: true,
-    dados: {
-      cnpj: digitos,
-      razaoSocial: (d.razao_social ?? "").trim(),
-      nomeFantasia: (d.nome_fantasia ?? "").trim(),
-      situacao: (d.descricao_situacao_cadastral ?? "").trim(),
-      atividade: (d.cnae_fiscal_descricao ?? "").trim(),
-      porte: porteDe(d),
-      regime: regimeDe(d),
-      uf: (d.uf ?? "").toUpperCase(),
-      municipio: (d.municipio ?? "").trim(),
-      municipioIbge: d.codigo_municipio_ibge ?? null,
-      telefone: telefone.length >= 10 ? telefone : "",
-      email: (d.email ?? "").trim().toLowerCase(),
-    },
+    ok: false,
+    error:
+      principal.falha === "limite" || reserva.falha === "limite"
+        ? "Muitas consultas seguidas. Aguarde um minuto e tente novamente."
+        : "Não foi possível consultar a Receita Federal agora. Preencha os dados manualmente.",
   };
 }
