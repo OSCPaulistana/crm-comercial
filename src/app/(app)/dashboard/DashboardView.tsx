@@ -6,6 +6,9 @@ import { KpiCard } from "@/components/ui/KpiCard";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { DateInput } from "@/components/ui/DateInput";
 import { Button } from "@/components/ui/Button";
+import type { Coordenada } from "@/lib/geo";
+import { DataTable, type Column } from "@/components/ui/DataTable";
+import { MapaNegocios, RankingCidades, type CidadeNegocio } from "./Mapa";
 import {
   CANAIS,
   ETAPA_AGENDADO,
@@ -24,7 +27,6 @@ import {
   AgendadosPorCanalChart,
   ContatosPorMeioChart,
   FaturamentoMetaChart,
-  FaturamentoProdutoLinhas,
   FaturamentoProdutoPie,
   FaturamentoVendedorChart,
   Funil,
@@ -38,11 +40,13 @@ export type AtendimentoResumo = Pick<
   Atendimento,
   | "id"
   | "data"
+  | "lead"
   | "canal"
   | "meio_contato_inicial"
   | "indicado_por"
   | "uf"
   | "municipio"
+  | "municipio_ibge"
   | "status"
   | "responsavel_id"
   | "campanha_id"
@@ -63,6 +67,8 @@ interface Props {
   produtos: Pick<Produto, "id" | "nome">[];
   vendedorInicial: string | null;
   nome: string;
+  /** [lng, lat] de cada município (código IBGE) com negócio fechado. */
+  coordenadas: Record<number, Coordenada>;
 }
 
 const SEM_PRODUTO = "__sem__";
@@ -72,6 +78,20 @@ const pad = (n: number) => String(n).padStart(2, "0");
 const mesKey = (iso: string) => iso.slice(0, 7);
 const localDe = (a: Pick<AtendimentoResumo, "municipio" | "uf">) => (a.municipio ? `${a.municipio}/${a.uf}` : "");
 const TOP = 10;
+const SEM_INDICADOR = "__sem_indicador__";
+
+/** Linha da relação de negócios efetivados por indicação. */
+interface NegocioIndicado {
+  id: string;
+  lead: string;
+  indicadorKey: string;
+  indicador: string;
+  vendedor: string;
+  local: string;
+  dataFechamento: string;
+  servicos: string;
+  valor: number;
+}
 
 function periodoPadrao() {
   const hoje = todayISO();
@@ -129,10 +149,12 @@ export function DashboardView({
   produtos,
   vendedorInicial,
   nome,
+  coordenadas,
 }: Props) {
   const [periodo, setPeriodo] = useState(periodoPadrao);
   const [vendedoresSel, setVendedoresSel] = useState<string[]>(vendedorInicial ? [vendedorInicial] : []);
   const [municipiosSel, setMunicipiosSel] = useState<string[]>([]);
+  const [indicadoresSel, setIndicadoresSel] = useState<string[]>([]);
 
   const invertido = periodo.ini && periodo.fim && periodo.ini > periodo.fim;
   const ini = invertido ? periodo.fim : periodo.ini;
@@ -248,33 +270,19 @@ export function DashboardView({
       a.campanha_id ? { k: a.campanha_id, nome: campanhaNome.get(a.campanha_id) ?? "Campanha removida" } : null,
     );
 
-    // 7) Faturamento por produto (pizza) e por produto ao longo dos meses (linhas)
+    // 7) Faturamento por produto (pizza)
     const fatProduto = new Map<string, number>();
-    const fatProdutoMes = new Map<string, number[]>();
     for (const a of efetivados) {
       // negócio com mais de um serviço: o valor é dividido igualmente entre eles
       const ids = (a.produtos_fechados ?? []).filter((id) => produtoInfo.has(id));
       const alvos = ids.length ? ids : [SEM_PRODUTO];
       const parte = Number(a.valor_fechado ?? 0) / alvos.length;
-      const i = idx.get(mesKey(a.data_fechamento!));
-      for (const pid of alvos) {
-        fatProduto.set(pid, (fatProduto.get(pid) ?? 0) + parte);
-        if (i === undefined) continue;
-        const serie = fatProdutoMes.get(pid) ?? buckets.map(() => 0);
-        serie[i] += parte;
-        fatProdutoMes.set(pid, serie);
-      }
+      for (const pid of alvos) fatProduto.set(pid, (fatProduto.get(pid) ?? 0) + parte);
     }
     const porProduto = [...fatProduto.entries()]
       .filter(([, v]) => v > 0)
       .map(([id, valor]) => ({ id, nome: produtoInfo.get(id)!.nome, cor: produtoInfo.get(id)!.cor, valor }))
       .sort((a, b) => b.valor - a.valor);
-    const seriesProduto = porProduto.map((p) => ({ key: p.id, nome: p.nome, cor: p.cor }));
-    const fatProdutoSerie = base().map((pt, i) => {
-      const row: MesPonto = { ...pt };
-      for (const s of seriesProduto) row[s.key] = buckets[i].key <= mesAtual ? fatProdutoMes.get(s.key)?.[i] ?? 0 : null;
-      return row;
-    });
 
     // 8) Faturamento x meta por vendedor
     const porVendedorMap = new Map<string, { nome: string; faturamento: number; meta: number }>();
@@ -297,6 +305,51 @@ export function DashboardView({
     const porVendedor = [...porVendedorMap.values()]
       .filter((v) => v.faturamento > 0 || v.meta > 0)
       .sort((a, b) => b.faturamento - a.faturamento || b.meta - a.meta);
+
+    // 8b) Relação detalhada: negócios efetivados (no período) vindos do canal Indicação
+    const vendNomeRel = new Map(vendedores.map((v) => [v.id, v.nome]));
+    const negociosIndicados: NegocioIndicado[] = efetivados
+      .filter((a) => a.canal === "Indicação")
+      .map((a) => {
+        const nomeInd = a.indicado_por?.trim() ?? "";
+        const ids = (a.produtos_fechados ?? []).filter((id) => produtoInfo.has(id));
+        return {
+          id: a.id,
+          lead: a.lead,
+          indicadorKey: nomeInd ? nomeInd.toLowerCase() : SEM_INDICADOR,
+          indicador: nomeInd || "Não informado",
+          vendedor: a.responsavel_id ? vendNomeRel.get(a.responsavel_id) ?? "—" : "Sem responsável",
+          local: localDe(a),
+          dataFechamento: a.data_fechamento!,
+          servicos: ids.map((id) => produtoInfo.get(id)!.nome).join(", "),
+          valor: Number(a.valor_fechado ?? 0),
+        };
+      });
+    const indicadorOpcoesMap = new Map<string, string>();
+    for (const n of negociosIndicados) if (!indicadorOpcoesMap.has(n.indicadorKey)) indicadorOpcoesMap.set(n.indicadorKey, n.indicador);
+    const indicadorOpcoes = [...indicadorOpcoesMap.entries()]
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
+
+    // 8c) Cidades com negócio fechado no período (mapa e ranking)
+    const cidadesMap = new Map<string, CidadeNegocio>();
+    let semLocalizacao = 0;
+    for (const a of efetivados) {
+      if (!a.municipio || !a.uf) {
+        semLocalizacao += 1;
+        continue;
+      }
+      const key = a.municipio_ibge ? String(a.municipio_ibge) : `${a.municipio}/${a.uf}`;
+      const pos = a.municipio_ibge ? coordenadas[a.municipio_ibge] : undefined;
+      const cur = cidadesMap.get(key) ?? { key, nome: a.municipio, uf: a.uf, qtd: 0, valor: 0, lng: pos?.[0], lat: pos?.[1] };
+      cur.qtd += 1;
+      cur.valor += Number(a.valor_fechado ?? 0);
+      cidadesMap.set(key, cur);
+    }
+    const cidades = [...cidadesMap.values()].sort((a, b) => b.qtd - a.qtd || b.valor - a.valor || a.nome.localeCompare(b.nome, "pt-BR"));
+    const topCidades = cidades.slice(0, 5);
+    // negócios cuja cidade não pôde ser posicionada também não aparecem no mapa
+    const semPonto = semLocalizacao + cidades.filter((c) => c.lng === undefined).reduce((s, c) => s + c.qtd, 0);
 
     // 9) Meio do PRIMEIRO contato (informado no registro do lead), por atendimento do período
     const porMeio = new Map<MeioContato, number>(MEIOS_CONTATO.map((m) => [m, 0]));
@@ -323,16 +376,59 @@ export function DashboardView({
       projecao,
       qtdPropostas: propostas.length,
       porProduto,
-      seriesProduto,
-      fatProdutoSerie,
       porVendedor,
       contatosPorMeio,
       semMeio,
       funil,
       indicadores,
       porCampanha: porCampanhaList,
+      negociosIndicados,
+      indicadorOpcoes,
+      cidades,
+      topCidades,
+      semPonto,
     };
-  }, [atendimentos, metas, vendedores, vendedoresSel, municipiosSel, ini, fim, campanhaNome, produtoInfo]);
+  }, [atendimentos, metas, vendedores, vendedoresSel, municipiosSel, ini, fim, campanhaNome, produtoInfo, coordenadas]);
+
+  // filtro "quem indicou" da relação (só afeta a tabela); ignora seleções que saíram do período
+  const indicadoresValidos = indicadoresSel.filter((k) => d.indicadorOpcoes.some((o) => o.value === k));
+  const negociosFiltrados = useMemo(
+    () =>
+      indicadoresValidos.length
+        ? d.negociosIndicados.filter((n) => indicadoresValidos.includes(n.indicadorKey))
+        : d.negociosIndicados,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [d.negociosIndicados, indicadoresSel],
+  );
+  const totalIndicados = negociosFiltrados.reduce((s, n) => s + n.valor, 0);
+
+  const colunasIndicados = useMemo<Column<NegocioIndicado>[]>(
+    () => [
+      { key: "lead", header: "Lead", value: (n) => n.lead, filter: false, className: "font-medium" },
+      { key: "indicador", header: "Quem indicou", value: (n) => n.indicador, filter: false },
+      { key: "vendedor", header: "Vendedor", value: (n) => n.vendedor, filter: false },
+      { key: "local", header: "Município", value: (n) => n.local, filter: false },
+      { key: "servicos", header: "Serviços fechados", value: (n) => n.servicos, filter: false, render: (n) => n.servicos || "—" },
+      {
+        key: "data",
+        header: "Fechamento",
+        value: (n) => n.dataFechamento,
+        filterValue: (n) => formatDate(n.dataFechamento),
+        render: (n) => formatDate(n.dataFechamento),
+        filter: false,
+      },
+      {
+        key: "valor",
+        header: "Valor fechado",
+        value: (n) => n.valor,
+        filterValue: (n) => formatBRL(n.valor),
+        render: (n) => <span className="tabular-nums">{formatBRL(n.valor)}</span>,
+        align: "right",
+        filter: false,
+      },
+    ],
+    [],
+  );
 
   const filtrosAtivos =
     vendedoresSel.length > 0 ||
@@ -520,13 +616,18 @@ export function DashboardView({
         <ChartCard title="Faturamento x meta por vendedor" subtitle="Faturado e meta de faturamento do período, por vendedor">
           <FaturamentoVendedorChart data={d.porVendedor} />
         </ChartCard>
-        <ChartCard
-          title="Faturamento por produto ao longo do tempo"
-          subtitle="Uma linha por serviço, por mês de fechamento"
-          className="xl:col-span-2"
-        >
-          <FaturamentoProdutoLinhas data={d.fatProdutoSerie} series={d.seriesProduto} />
-        </ChartCard>
+        <div className="grid grid-cols-1 gap-4 xl:col-span-2 xl:grid-cols-3">
+          <ChartCard
+            title="Mapa de negócios fechados"
+            subtitle="Um ponto em cada cidade com negócio fechado no período, com a quantidade"
+            className="xl:col-span-2"
+          >
+            <MapaNegocios cidades={d.cidades} semLocalizacao={d.semPonto} />
+          </ChartCard>
+          <ChartCard title="Top 5 cidades" subtitle="Cidades com mais negócios fechados no período">
+            <RankingCidades cidades={d.topCidades} />
+          </ChartCard>
+        </div>
         <ChartCard title="Negócios por pessoa que indicou" subtitle="Atendimentos do canal Indicação registrados no período">
           <StatusRankingChart
             data={d.indicadores}
@@ -541,6 +642,43 @@ export function DashboardView({
           />
         </ChartCard>
       </div>
+
+      <section className="mt-4" aria-labelledby="relacao-indicacoes">
+        <header className="mb-3 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 id="relacao-indicacoes" className="text-[15px] font-semibold text-fg">
+              Negócios efetivados por indicação
+            </h2>
+            <p className="mt-0.5 text-xs text-fg-2">
+              Relação detalhada dos fechamentos do canal Indicação no período
+              {negociosFiltrados.length > 0 &&
+                ` · ${formatNumber(negociosFiltrados.length)} negócio${negociosFiltrados.length === 1 ? "" : "s"} · ${formatBRL(totalIndicados)}`}
+            </p>
+          </div>
+          <div className="w-full min-w-56 sm:w-72">
+            <span className="field-label">Quem indicou</span>
+            <MultiSelect
+              aria-label="Filtrar por quem indicou"
+              options={d.indicadorOpcoes}
+              value={indicadoresValidos}
+              onChange={setIndicadoresSel}
+              placeholder={d.indicadorOpcoes.length ? "Todos que indicaram" : "Nenhuma indicação no período"}
+              pluralLabel="indicadores"
+            />
+          </div>
+        </header>
+        <DataTable
+          rows={negociosFiltrados}
+          columns={colunasIndicados}
+          rowKey={(n) => n.id}
+          initialSort={{ key: "data", dir: "desc" }}
+          pageSize={10}
+          searchPlaceholder="Buscar lead, serviço..."
+          emptyTitle="Nenhum negócio efetivado por indicação"
+          emptyDescription="Não há fechamentos do canal Indicação no período e nos filtros selecionados."
+          exportFileName="negocios-efetivados-por-indicacao"
+        />
+      </section>
     </>
   );
 }

@@ -279,48 +279,6 @@ export function FaturamentoProdutoPie({ data }: { data: { id: string; nome: stri
 }
 
 /* ------------------------------------------------------------------ */
-/* Faturamento por produto — uma linha por produto                     */
-/* ------------------------------------------------------------------ */
-export function FaturamentoProdutoLinhas({
-  data,
-  series,
-}: {
-  data: MesPonto[];
-  series: { key: string; nome: string; cor: string }[];
-}) {
-  if (series.length === 0) {
-    return <div className="flex h-[260px] items-center justify-center text-sm text-fg-3">Nenhum faturamento no período.</div>;
-  }
-  return (
-    <div style={{ height: HEIGHT + 30 }} role="img" aria-label="Gráfico de linhas: faturamento mensal por produto">
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={data} margin={{ top: 8, right: 16, left: 4, bottom: 0 }}>
-          <CartesianGrid vertical={false} stroke={GRID} />
-          <XAxis dataKey="label" tick={AXIS} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-          <YAxis tickFormatter={(v) => formatBRLCompact(v)} tick={AXIS} axisLine={false} tickLine={false} width={72} />
-          <Tooltip cursor={{ stroke: "#d1d5db", strokeDasharray: "3 3" }} content={tip(formatBRL)} />
-          <Legend content={() => <LegendContent items={series.map((s) => ({ label: s.nome, color: s.cor }))} />} />
-          {series.map((s) => (
-            <Line
-              key={s.key}
-              type="monotone"
-              dataKey={s.key}
-              name={s.nome}
-              stroke={s.cor}
-              strokeWidth={2}
-              dot={{ r: 3.5, fill: s.cor, stroke: "#fff", strokeWidth: 2 }}
-              activeDot={{ r: 5, stroke: "#fff", strokeWidth: 2 }}
-              connectNulls={false}
-              isAnimationActive={false}
-            />
-          ))}
-        </LineChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
 /* Faturamento x meta por vendedor — barras verticais agrupadas        */
 /* ------------------------------------------------------------------ */
 export function FaturamentoVendedorChart({ data }: { data: { nome: string; faturamento: number; meta: number }[] }) {

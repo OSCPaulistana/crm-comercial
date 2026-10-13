@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { requirePerfil } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAll } from "@/lib/supabase/fetch-all";
+import { centroidesMunicipios } from "@/lib/geo";
 import type { Campanha, Meta, Produto, Vendedor } from "@/types/database";
 import { DashboardView, type AtendimentoResumo } from "./DashboardView";
 
@@ -16,7 +17,7 @@ export default async function DashboardPage() {
       supabase
         .from("atendimentos")
         .select(
-          "id, data, canal, meio_contato_inicial, indicado_por, uf, municipio, status, responsavel_id, campanha_id, etapa_maxima, data_visita, proposta_valor, produtos_fechados, valor_fechado, data_fechamento, data_declinio",
+          "id, data, lead, canal, meio_contato_inicial, indicado_por, uf, municipio, municipio_ibge, status, responsavel_id, campanha_id, etapa_maxima, data_visita, proposta_valor, produtos_fechados, valor_fechado, data_fechamento, data_declinio",
         )
         .range(from, to),
     ),
@@ -26,6 +27,11 @@ export default async function DashboardPage() {
     // ordem do catálogo = ordem fixa das cores dos produtos nos gráficos
     supabase.from("produtos").select("id, nome").order("created_at").order("nome"),
   ]);
+
+  // pontos do mapa: centro de cada município que já teve negócio fechado (contorno do IBGE, em cache)
+  const coordenadas = await centroidesMunicipios(
+    atendimentos.filter((a) => a.status === "negocio_efetivado" && a.municipio_ibge).map((a) => a.municipio_ibge as number),
+  );
 
   const vendedoresList = (vendedores.data ?? []) as Vendedor[];
   const meuVendedorId = vendedoresList.find((v) => v.profile_id === profile.id)?.id ?? null;
@@ -39,6 +45,7 @@ export default async function DashboardPage() {
       produtos={(produtos.data ?? []) as Pick<Produto, "id" | "nome">[]}
       vendedorInicial={profile.perfil === "vendedor" ? meuVendedorId : null}
       nome={profile.nome}
+      coordenadas={coordenadas}
     />
   );
 }

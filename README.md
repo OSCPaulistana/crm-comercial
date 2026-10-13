@@ -29,6 +29,9 @@ As permissões são aplicadas em **duas camadas**: no servidor (cada página val
 - **Proposta enviada**: exige os **serviços/pacotes propostos (múltipla escolha — pode ser mais de um)** e o **valor total proposto**. As propostas em aberto formam a **projeção de faturamento** do dashboard.
 - **Negócio efetivado**: se houve proposta, pede a confirmação de que o fechamento foi **conforme a proposta** (serviços e valor). Se houve alteração, informam-se os serviços (múltipla escolha) e o valor total fechados. Sem proposta, informa-se direto. O valor fechado alimenta o faturamento. Nos gráficos por produto, o valor de um negócio com mais de um serviço é **dividido igualmente** entre eles. O catálogo de produtos não tem preço, só a recorrência.
 - **Indicação**: quando o canal é *Indicação*, o campo **Quem indicou** é obrigatório. Os nomes já usados aparecem como sugestão, para manter a mesma grafia.
+- **CNPJ do lead**: é o primeiro dado do registro, logo depois da data. Ao digitar um CNPJ válido, o sistema consulta a Receita Federal (BrasilAPI) e preenche nome (fantasia ou razão social), porte, regime (MEI/Simples pela opção da empresa; Lucro Presumido/Real pela escrituração mais recente), UF/município, telefone e e-mail. Só preenche campos vazios ou preenchidos por uma consulta anterior, nunca o que a pessoa digitou. Os demais campos seguem manuais. O campo continua opcional; se a Receita não responder, o preenchimento é manual.
+- **Mapa de negócios fechados**: no dashboard, mapa do Brasil (contornos de `public/geo/brasil-uf.json`, do IBGE) com um ponto e a quantidade em cada cidade com negócio fechado no período. Roda do mouse dá zoom (os nomes das cidades aparecem ao aproximar) e arrastar move. Ao lado, ranking das 5 cidades com mais negócios fechados. Respeitam os filtros do dashboard.
+- **Negócios efetivados por indicação**: relação detalhada no fim do dashboard, com filtro de quem indicou e exportação em CSV.
 - **Município do lead**: UF + município (IBGE) são obrigatórios no atendimento e alimentam o filtro do dashboard.
 - **Gráfico "tipo de 1º contato"**: usa o **Canal de prospecção** do atendimento (Indicação, Captação, Redes Sociais, Alex).
 - **Filtros do dashboard**: período *entre* datas (dd/mm/aaaa, com atalhos), vendedores e municípios (múltipla escolha). As metas respeitam o período e os vendedores selecionados. Metas não têm município, então esse filtro não as altera.
@@ -55,7 +58,8 @@ No Supabase, abra **SQL Editor** e execute, nesta ordem:
 9. `supabase/migrations/20261013000009_proposta_varios_servicos.sql`
 10. `supabase/migrations/20261014000010_qualif_outras_empresas_obs.sql`
 11. `supabase/migrations/20261014000011_importacao_crm_anterior.sql`
-12. *(opcional)* `supabase/seed-demo.sql` — cria produtos, 2 vendedores, metas e 120 atendimentos fictícios para você validar o dashboard. No fim do arquivo há o SQL para removê-los.
+12. `supabase/migrations/20261014000012_leitura_claude.sql` (role e views somente leitura, opcional; ver seção MCP)
+13. *(opcional)* `supabase/seed-demo.sql` — cria produtos, 2 vendedores, metas e 120 atendimentos fictícios para você validar o dashboard. No fim do arquivo há o SQL para removê-los.
 
 > Com a Supabase CLI, você também pode usar `supabase link` + `supabase db push`.
 
@@ -147,3 +151,27 @@ node --env-file=.env.local tools/importacao/importar.mjs --desfazer crm-anterior
 ```
 
 Regras: canal Parceiro → Indicação · Evento → Captação · Google → Redes Sociais · demais → Outros; duplicados pelo CNPJ são consolidados (todas as observações vão para a linha do tempo); perdidos/negativos viram Declinado + Giro de Carteira com as datas dos follow-ups; porte e regime ausentes ficam "Não informado" (a tela continua exigindo o valor real ao salvar); responsável = Leila; etiqueta **Importado** em todos os leads. Rodar a ferramenta de novo não duplica leads já importados.
+
+## Acesso somente leitura para Claude/Obsidian (MCP)
+
+Servidor MCP em `tools/mcp-leitura/` que permite ao Claude **consultar** os dados do CRM, sem qualquer permissão de escrita.
+
+- **Chave de acesso**: role Postgres `claude_leitura` (migration `20261014000012_leitura_claude.sql`). Ela só enxerga as views do schema `leitura` (atendimentos, histórico, notas, giro, campanhas, produtos, vendedores, metas). **Não expõe** telefone, e-mail e nome de contato dos leads, e-mails de usuários, anexos nem o schema `auth`.
+- **Camadas de proteção**: a role não tem permissão de escrita; ela e cada consulta rodam em modo *read only*, com limite de 500 linhas e 15 s; o MCP só aceita um `SELECT`/`WITH` por vez.
+- **Senha**: fica só em `tools/mcp-leitura/.env` (ignorado pelo git): `CRM_LEITURA_SENHA`, `CRM_LEITURA_HOST`, `CRM_LEITURA_PORT`. Para trocar: `alter role claude_leitura with password '...'` no SQL Editor e atualizar o `.env`. Para revogar o acesso: `alter role claude_leitura nologin`.
+- **Instalar**: `cd tools/mcp-leitura && npm install`.
+- **Claude Code**: o `.mcp.json` da raiz já registra o servidor `crm-leitura` (aprove-o ao abrir o projeto).
+- **Claude Desktop** (`claude_desktop_config.json`, ajuste os caminhos):
+
+```json
+{
+  "mcpServers": {
+    "crm-leitura": {
+      "command": "node",
+      "args": ["--env-file=C:\projetos\crm-comercial\tools\mcp-leitura\.env", "C:\projetos\crm-comercial\tools\mcp-leitura\server.mjs"]
+    }
+  }
+}
+```
+
+Ferramentas expostas: `listar_tabelas` (views e colunas) e `consultar` (SELECT em PostgreSQL).

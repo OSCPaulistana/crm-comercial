@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Ban, FileText, History, MoveRight, Pencil, RefreshCcw, Shuffle, Trash2 } from "lucide-react";
+import { Ban, FileText, History, Loader2, MoveRight, Pencil, RefreshCcw, Search, Shuffle, Trash2 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Field, Input, Select, Textarea } from "@/components/ui/Field";
@@ -12,6 +12,9 @@ import { useToast } from "@/components/ui/Toast";
 import { StatusBadge } from "@/components/StatusBadge";
 import { UfMunicipioFields } from "@/components/UfMunicipioFields";
 import { createClient } from "@/lib/supabase/client";
+import { cnpjValido } from "@/lib/cnpj";
+import { fetchMunicipios } from "@/lib/ibge";
+import { consultarCnpj } from "./actions";
 import {
   CANAIS,
   ETAPA_AGENDADO,
@@ -161,6 +164,19 @@ type Erros = Partial<Record<keyof FormState, string>>;
 /** O checklist de qualificação é obrigatório para entrar em Agendado Visita ou etapas seguintes. */
 const exigeChecklist = (s: StatusAtendimento) => STATUS_MAP[s].etapa >= ETAPA_AGENDADO;
 
+/** Campos do lead preenchidos pela consulta do CNPJ (para não sobrescrever o que a pessoa digitou). */
+type AutoPreenchido = Partial<Record<"lead" | "porte" | "regime" | "telefone" | "email" | "municipio", string>>;
+type StatusCnpj = { estado: "idle" | "carregando" | "ok" | "aviso" | "erro"; msg: string };
+
+const PALAVRAS_MINUSCULAS = new Set(["de", "da", "do", "das", "dos", "e"]);
+/** "SAO JOSE DOS CAMPOS" → "São José dos Campos" só até o ponto de manter legível (usado se o IBGE falhar). */
+const capitalizar = (s: string) =>
+  s
+    .toLowerCase()
+    .split(" ")
+    .map((p, i) => (i > 0 && PALAVRAS_MINUSCULAS.has(p) ? p : p.charAt(0).toUpperCase() + p.slice(1)))
+    .join(" ");
+
 /** Movimento de etapa em andamento (janela de confirmação). */
 type Movimento = { modo: "avancar" | "declinar" | "mover"; alvo: StatusAtendimento | "" };
 
@@ -203,6 +219,10 @@ function AtendimentoFormInner({
   const [giro, setGiro] = useState<GiroCarteira | null>(null);
   const [notaExcluir, setNotaExcluir] = useState<NotaRow | null>(null);
   const [recarregar, setRecarregar] = useState(0);
+  const [cnpjStatus, setCnpjStatus] = useState<StatusCnpj>({ estado: "idle", msg: "" });
+  /** CNPJ (só dígitos) cuja consulta está valendo; respostas de CNPJs antigos são descartadas. */
+  const cnpjConsultado = useRef("");
+  const autoPreenchido = useRef<AutoPreenchido>({});
 
   useEffect(() => {
     if (!atendimento) return;
@@ -302,7 +322,10 @@ function AtendimentoFormInner({
     const e: Erros = {};
     if (!f.data) e.data = "Informe a data.";
     if (!f.lead.trim()) e.lead = "Informe o nome do cliente.";
-    if (f.cnpj && f.cnpj.replace(/\D/g, "").length !== 14) e.cnpj = "O CNPJ deve ter 14 dígitos.";
+    const cnpjDigitos = f.cnpj.replace(/\D/g, "");
+    if (f.cnpj && cnpjDigitos.length !== 14) e.cnpj = "O CNPJ deve ter 14 dígitos.";
+    else if (cnpjDigitos && cnpjDigitos !== (atendimento?.cnpj ?? "").replace(/\D/g, "") && !cnpjValido(cnpjDigitos))
+      e.cnpj = "CNPJ inválido. Confira os números digitados.";
     if (!f.porte) e.porte = "Selecione o porte.";
     if (!f.regime) e.regime = "Selecione o regime.";
     if (!f.canal) e.canal = "Selecione o canal.";
@@ -626,6 +649,80 @@ function AtendimentoFormInner({
     else if (f.regime === "MEI") set("regime", "");
   };
 
+  /** Consulta o CNPJ na Receita Federal e preenche o que ainda estiver vazio (ou foi preenchido pela consulta anterior). */
+  async function buscarCnpj(digitos: string) {
+    cnpjConsultado.current = digitos;
+    setCnpjStatus({ estado: "carregando", msg: "Consultando a Receita Federal..." });
+    const r = await consultarCnpj(digitos);
+    if (cnpjConsultado.current !== digitos) return;
+    if (!r.ok) {
+      setCnpjStatus({ estado: "erro", msg: r.error });
+      return;
+    }
+    const d = r.dados;
+
+    // nome do município exatamente como na lista do IBGE (é o que o seletor reconhece)
+    let municipio = d.municipio ? capitalizar(d.municipio) : "";
+    if (d.uf && d.municipioIbge) {
+      try {
+        const lista = await fetchMunicipios(d.uf);
+        municipio = lista.find((m) => m.id === d.municipioIbge)?.nome ?? municipio;
+      } catch {
+        /* mantém o nome da Receita */
+      }
+      if (cnpjConsultado.current !== digitos) return;
+    }
+
+    const nome = d.nomeFantasia || d.razaoSocial;
+    const anterior = autoPreenchido.current;
+    const livre = (campo: keyof AutoPreenchido, atual: string) => !atual || anterior[campo] === atual;
+    const novo: AutoPreenchido = { ...anterior };
+
+    setF((s) => {
+      const n = { ...s };
+      if (nome && livre("lead", s.lead)) n.lead = novo.lead = nome;
+      if (d.porte && livre("porte", s.porte)) n.porte = novo.porte = d.porte;
+      if (d.regime && livre("regime", s.regime)) n.regime = novo.regime = d.regime;
+      if (d.telefone && livre("telefone", s.telefone)) n.telefone = novo.telefone = maskPhone(d.telefone);
+      if (d.email && livre("email", s.email)) n.email = novo.email = d.email;
+      if (d.uf && municipio && livre("municipio", s.municipio)) {
+        n.uf = d.uf;
+        n.municipio = novo.municipio = municipio;
+        n.municipio_ibge = d.municipioIbge;
+      }
+      return n;
+    });
+    autoPreenchido.current = novo;
+    setErrors((e) => ({ ...e, cnpj: undefined, lead: undefined, porte: undefined, regime: undefined, uf: undefined, municipio: undefined }));
+
+    const pendentes = [!d.porte && "porte", !d.regime && "regime"].filter(Boolean).join(" e ");
+    const inativa = d.situacao && d.situacao.toUpperCase() !== "ATIVA";
+    setCnpjStatus({
+      estado: inativa || pendentes ? "aviso" : "ok",
+      msg:
+        `Receita Federal: ${d.razaoSocial || nome}` +
+        (d.situacao ? ` · situação ${d.situacao.toLowerCase()}` : "") +
+        (inativa ? ". Atenção: o CNPJ não está ativo." : ".") +
+        (pendentes ? ` Não foi possível identificar ${pendentes}: selecione manualmente.` : " Confira os campos preenchidos."),
+    });
+  }
+
+  const onCnpj = (valor: string) => {
+    const mascarado = maskCnpj(valor);
+    set("cnpj", mascarado);
+    const digitos = mascarado.replace(/\D/g, "");
+    if (digitos.length < 14) {
+      cnpjConsultado.current = "";
+      setCnpjStatus({ estado: "idle", msg: "" });
+    } else if (!cnpjValido(digitos)) {
+      cnpjConsultado.current = "";
+      setCnpjStatus({ estado: "erro", msg: "CNPJ inválido. Confira os números digitados." });
+    } else {
+      void buscarCnpj(digitos);
+    }
+  };
+  const cnpjDigitos = f.cnpj.replace(/\D/g, "");
+
   /* ------------------------------------------------------------------ */
   /* Blocos de interface                                                 */
   /* ------------------------------------------------------------------ */
@@ -653,13 +750,51 @@ function AtendimentoFormInner({
         error={errors.data}
         wrapperClassName="sm:col-span-2"
       />
+      <Field
+        label="CNPJ"
+        error={errors.cnpj}
+        hint={cnpjStatus.estado === "idle" ? "Digite o CNPJ: os dados da Receita Federal são preenchidos automaticamente." : undefined}
+        htmlFor="campo-cnpj"
+        className="sm:col-span-4"
+      >
+        <div className="relative">
+          <input
+            id="campo-cnpj"
+            inputMode="numeric"
+            autoComplete="off"
+            value={f.cnpj}
+            onChange={(e) => onCnpj(e.target.value)}
+            placeholder="00.000.000/0000-00"
+            aria-invalid={errors.cnpj ? true : undefined}
+            className="form-control pr-10 tabular-nums"
+          />
+          <button
+            type="button"
+            onClick={() => cnpjValido(cnpjDigitos) && void buscarCnpj(cnpjDigitos)}
+            disabled={!cnpjValido(cnpjDigitos) || cnpjStatus.estado === "carregando"}
+            aria-label="Consultar CNPJ na Receita Federal"
+            title="Consultar CNPJ na Receita Federal"
+            className="absolute top-1/2 right-1 flex size-8 -translate-y-1/2 items-center justify-center rounded text-fg-3 enabled:hover:bg-gray-100 enabled:hover:text-fg disabled:cursor-default"
+          >
+            {cnpjStatus.estado === "carregando" ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
+          </button>
+        </div>
+        {!errors.cnpj && cnpjStatus.estado !== "idle" && (
+          <p
+            role="status"
+            className={`mt-1 text-xs ${cnpjStatus.estado === "erro" ? "text-danger" : cnpjStatus.estado === "aviso" ? "text-warning" : cnpjStatus.estado === "ok" ? "text-success" : "text-fg-2"}`}
+          >
+            {cnpjStatus.msg}
+          </p>
+        )}
+      </Field>
       <Input
         label="Lead (nome do cliente)"
         required
         value={f.lead}
         onChange={(e) => set("lead", e.target.value)}
         error={errors.lead}
-        wrapperClassName="sm:col-span-4"
+        wrapperClassName="sm:col-span-6"
         maxLength={200}
       />
       <Input
@@ -678,22 +813,12 @@ function AtendimentoFormInner({
         wrapperClassName="sm:col-span-4"
       />
       <Input
-        label="CNPJ"
-        inputMode="numeric"
-        value={f.cnpj}
-        onChange={(e) => set("cnpj", maskCnpj(e.target.value))}
-        error={errors.cnpj}
-        placeholder="00.000.000/0000-00"
-        className="tabular-nums"
-        wrapperClassName="sm:col-span-2"
-      />
-      <Input
         label="Nome do contato"
         value={f.contato_nome}
         onChange={(e) => set("contato_nome", e.target.value)}
         placeholder="Pessoa com quem falamos"
         maxLength={150}
-        wrapperClassName="sm:col-span-4"
+        wrapperClassName="sm:col-span-6"
       />
       <Select
         label="Porte"

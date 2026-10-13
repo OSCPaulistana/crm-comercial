@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "crm-leitura": {
+      "command": "node",
+      "args": ["--env-file=tools/mcp-leitura/.env", "tools/mcp-leitura/server.mjs"]
+    }
+  }
+}
