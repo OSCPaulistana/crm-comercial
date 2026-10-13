@@ -18,10 +18,12 @@ export const ADMIN: Perfil[] = ["administrador"];
 
 export const PORTES = ["MEI", "ME", "EPP", "DEMAIS"] as const;
 export const REGIMES = ["MEI", "Simples Nacional", "Lucro Presumido", "Lucro Real"] as const;
-export const CANAIS = ["Indicação", "Captação", "Redes Sociais", "Alex"] as const;
+export const CANAIS = ["Indicação", "Captação", "Redes Sociais", "Alex", "Outros"] as const;
+/** Valor usado nos leads importados que não trazem porte/regime. Não é uma opção de escolha na tela. */
+export const NAO_INFORMADO = "Não informado" as const;
 
-export type Porte = (typeof PORTES)[number];
-export type Regime = (typeof REGIMES)[number];
+export type Porte = (typeof PORTES)[number] | typeof NAO_INFORMADO;
+export type Regime = (typeof REGIMES)[number] | typeof NAO_INFORMADO;
 export type Canal = (typeof CANAIS)[number];
 
 export type Tone = "neutral" | "info" | "success" | "warning" | "danger";
@@ -113,6 +115,8 @@ export const CANAL_COLOR: Record<Canal, string> = {
   "Captação": SERIES_COLORS[1],
   "Redes Sociais": SERIES_COLORS[2],
   "Alex": SERIES_COLORS[3],
+  // "Outros" segue a convenção de cinza neutro para a categoria residual
+  "Outros": "#9ca3af",
 };
 /**
  * Paleta categórica para produtos (ordem fixa; a cor segue o produto pela

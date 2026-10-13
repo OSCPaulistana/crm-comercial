@@ -17,6 +17,7 @@ import {
   ETAPA_AGENDADO,
   GIRO_INTERVALO_DIAS,
   MOTIVOS_DECLINIO,
+  NAO_INFORMADO,
   PORTES,
   RECORRENCIA_LABEL,
   REGIMES,
@@ -30,6 +31,7 @@ import {
 import {
   formatBRL,
   formatDate,
+  maskCnpj,
   maskMoney,
   maskPhone,
   moneyToInput,
@@ -74,6 +76,8 @@ type FormState = {
   lead: string;
   telefone: string;
   email: string;
+  cnpj: string;
+  contato_nome: string;
   porte: string;
   regime: string;
   canal: string;
@@ -108,8 +112,11 @@ function initialState(a: Atendimento | null, meuVendedorId: string | null): Form
     lead: a?.lead ?? "",
     telefone: a?.telefone ?? "",
     email: a?.email ?? "",
-    porte: a?.porte ?? "",
-    regime: a?.regime ?? "",
+    cnpj: a?.cnpj ?? "",
+    contato_nome: a?.contato_nome ?? "",
+    // "Não informado" (leads importados) é tratado como pendente: a tela exige escolher um valor real
+    porte: a?.porte && a.porte !== NAO_INFORMADO ? a.porte : "",
+    regime: a?.regime && a.regime !== NAO_INFORMADO ? a.regime : "",
     canal: a?.canal ?? "",
     indicado_por: a?.indicado_por ?? "",
     uf: a?.uf ?? (a ? "" : "SP"),
@@ -136,6 +143,7 @@ function initialState(a: Atendimento | null, meuVendedorId: string | null): Form
 }
 
 const CAMPOS_LEAD = [
+  "cnpj",
   "data",
   "lead",
   "porte",
@@ -294,6 +302,7 @@ function AtendimentoFormInner({
     const e: Erros = {};
     if (!f.data) e.data = "Informe a data.";
     if (!f.lead.trim()) e.lead = "Informe o nome do cliente.";
+    if (f.cnpj && f.cnpj.replace(/\D/g, "").length !== 14) e.cnpj = "O CNPJ deve ter 14 dígitos.";
     if (!f.porte) e.porte = "Selecione o porte.";
     if (!f.regime) e.regime = "Selecione o regime.";
     if (!f.canal) e.canal = "Selecione o canal.";
@@ -329,10 +338,15 @@ function AtendimentoFormInner({
     return e;
   }
 
+  /** Lead importado gravando sem mudar de etapa: os dados da etapa atual só são cobrados ao avançar. */
+  const soManterImportado = (alvo: StatusAtendimento) => Boolean(atendimento?.importado) && editing && alvo === atendimento?.status;
+
   /** Valida o dado do lead + as exigências da etapa de destino e mostra os erros. */
   function validarTudo(alvo: StatusAtendimento) {
-    const e = { ...errosLead(), ...errosEtapa(alvo) };
-    const ce = exigeChecklist(alvo) ? checklistErros(chk) : {};
+    // Lead importado, sem mudar de etapa: os dados da etapa atual (proposta, checklist…) só são cobrados ao avançar
+    const soManter = soManterImportado(alvo);
+    const e = { ...errosLead(), ...(soManter ? {} : errosEtapa(alvo)) };
+    const ce = !soManter && exigeChecklist(alvo) ? checklistErros(chk) : {};
     setErrors(e);
     setChkErros(ce);
     if (CAMPOS_LEAD.some((k) => e[k])) setEditarDados(true);
@@ -390,7 +404,7 @@ function AtendimentoFormInner({
     if (!validarTudo(alvo)) {
       toast.error(
         "Não foi possível salvar o atendimento.",
-        exigeChecklist(alvo) && !checklistCompleto
+        exigeChecklist(alvo) && !checklistCompleto && !soManterImportado(alvo)
           ? "Complete o checklist de qualificação para avançar de etapa."
           : "Verifique os campos destacados e tente novamente.",
       );
@@ -424,6 +438,8 @@ function AtendimentoFormInner({
       lead: f.lead.trim(),
       telefone: f.telefone || null,
       email: f.email.trim() || null,
+      cnpj: f.cnpj ? maskCnpj(f.cnpj) : null,
+      contato_nome: f.contato_nome.trim() || null,
       porte: f.porte,
       regime: f.regime,
       canal: f.canal,
@@ -661,6 +677,24 @@ function AtendimentoFormInner({
         onChange={(e) => set("email", e.target.value)}
         wrapperClassName="sm:col-span-4"
       />
+      <Input
+        label="CNPJ"
+        inputMode="numeric"
+        value={f.cnpj}
+        onChange={(e) => set("cnpj", maskCnpj(e.target.value))}
+        error={errors.cnpj}
+        placeholder="00.000.000/0000-00"
+        className="tabular-nums"
+        wrapperClassName="sm:col-span-2"
+      />
+      <Input
+        label="Nome do contato"
+        value={f.contato_nome}
+        onChange={(e) => set("contato_nome", e.target.value)}
+        placeholder="Pessoa com quem falamos"
+        maxLength={150}
+        wrapperClassName="sm:col-span-4"
+      />
       <Select
         label="Porte"
         required
@@ -669,6 +703,7 @@ function AtendimentoFormInner({
         placeholder="Selecione"
         options={PORTES.map((p) => ({ value: p, label: p }))}
         error={errors.porte}
+        hint={atendimento?.porte === NAO_INFORMADO && !f.porte ? "Não informado no CRM anterior: selecione o porte." : undefined}
         wrapperClassName="sm:col-span-2"
       />
       <Select
@@ -679,6 +714,7 @@ function AtendimentoFormInner({
         placeholder="Selecione"
         options={REGIMES.map((p) => ({ value: p, label: p }))}
         error={errors.regime}
+        hint={atendimento?.regime === NAO_INFORMADO && !f.regime ? "Não informado no CRM anterior: selecione o regime." : undefined}
         wrapperClassName="sm:col-span-2"
       />
       <Select
@@ -1004,7 +1040,7 @@ function AtendimentoFormInner({
         title={editing ? atendimento!.lead : "Novo atendimento"}
         description={
           editing
-            ? `Registrado em ${formatDate(atendimento!.data)} · ${vendedorNome(atendimento!.responsavel_id ?? "")}`
+            ? `Registrado em ${formatDate(atendimento!.data)} · ${vendedorNome(atendimento!.responsavel_id ?? "")}${atendimento!.importado ? " · Importado do CRM anterior" : ""}`
             : "Preencha os dados do lead atendido."
         }
         footer={
@@ -1073,7 +1109,9 @@ function AtendimentoFormInner({
               dadosLead
             ) : (
               <dl className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-[10px] bg-gray-50 p-4 text-sm sm:grid-cols-3">
-                <Info label="Porte / Regime" value={`${f.porte} · ${f.regime}`} />
+                <Info label="CNPJ" value={f.cnpj || "—"} />
+                <Info label="Contato" value={f.contato_nome || "—"} />
+                <Info label="Porte / Regime" value={`${f.porte || NAO_INFORMADO} · ${f.regime || NAO_INFORMADO}`} />
                 <Info label="Canal" value={f.canal === "Indicação" && f.indicado_por ? `Indicação — ${f.indicado_por}` : f.canal} />
                 <Info label="Município" value={f.municipio ? `${f.municipio}/${f.uf}` : "—"} />
                 <Info label="Telefone" value={f.telefone || "—"} />

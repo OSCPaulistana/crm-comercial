@@ -77,6 +77,11 @@ export interface Atendimento {
   regime: Regime;
   canal: Canal;
   indicado_por: string | null;
+  cnpj: string | null;
+  contato_nome: string | null;
+  /** Registro trazido do CRM anterior (etiqueta "Importado"). */
+  importado: boolean;
+  importacao_lote: string | null;
   uf: string | null;
   municipio: string | null;
   municipio_ibge: number | null;

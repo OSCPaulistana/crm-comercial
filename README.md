@@ -54,7 +54,8 @@ No Supabase, abra **SQL Editor** e execute, nesta ordem:
 8. `supabase/migrations/20261010000008_checklist_visita_meio_inicial.sql`
 9. `supabase/migrations/20261013000009_proposta_varios_servicos.sql`
 10. `supabase/migrations/20261014000010_qualif_outras_empresas_obs.sql`
-11. *(opcional)* `supabase/seed-demo.sql` — cria produtos, 2 vendedores, metas e 120 atendimentos fictícios para você validar o dashboard. No fim do arquivo há o SQL para removê-los.
+11. `supabase/migrations/20261014000011_importacao_crm_anterior.sql`
+12. *(opcional)* `supabase/seed-demo.sql` — cria produtos, 2 vendedores, metas e 120 atendimentos fictícios para você validar o dashboard. No fim do arquivo há o SQL para removê-los.
 
 > Com a Supabase CLI, você também pode usar `supabase link` + `supabase db push`.
 
@@ -129,3 +130,20 @@ public/branding/               Logos oficiais (arquivos originais, só o espaço
 | `npm run build` | Build de produção |
 | `npm run typecheck` | Verificação de tipos |
 | `npm run create-admin -- email senha "Nome"` | Cria ou promove um administrador |
+
+## Importação da base do CRM anterior
+
+Ferramenta avulsa em `tools/importacao/` (não faz parte do build do sistema). Primeira vez: `cd tools/importacao && npm install`.
+
+```bash
+# 1) Simulação — não grava nada e gera a planilha de conferência
+node --env-file=.env.local tools/importacao/importar.mjs "C:\caminho\exportacao.xlsx" --saida "C:\caminho\conferencia.xlsx"
+
+# 2) Importação de verdade
+node --env-file=.env.local tools/importacao/importar.mjs "C:\caminho\exportacao.xlsx" --executar
+
+# Desfazer o lote importado (remove os leads com histórico, registros e giro)
+node --env-file=.env.local tools/importacao/importar.mjs --desfazer crm-anterior-2026-09-24
+```
+
+Regras: canal Parceiro → Indicação · Evento → Captação · Google → Redes Sociais · demais → Outros; duplicados pelo CNPJ são consolidados (todas as observações vão para a linha do tempo); perdidos/negativos viram Declinado + Giro de Carteira com as datas dos follow-ups; porte e regime ausentes ficam "Não informado" (a tela continua exigindo o valor real ao salvar); responsável = Leila; etiqueta **Importado** em todos os leads. Rodar a ferramenta de novo não duplica leads já importados.

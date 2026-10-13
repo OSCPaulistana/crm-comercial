@@ -1,0 +1,10 @@
+{
+  "name": "importacao-crm-anterior",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Ferramenta avulsa para importar a base de leads do CRM anterior (fora do build do sistema)",
+  "type": "module",
+  "dependencies": {
+    "exceljs": "^4.4.0"
+  }
+}

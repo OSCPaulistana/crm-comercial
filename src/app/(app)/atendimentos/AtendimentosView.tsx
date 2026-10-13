@@ -6,7 +6,8 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { StatusBadge } from "@/components/StatusBadge";
-import { CANAIS, PORTES, REGIMES, STATUS, STATUS_MAP } from "@/lib/constants";
+import { CANAIS, NAO_INFORMADO, PORTES, REGIMES, STATUS, STATUS_MAP } from "@/lib/constants";
+import { Badge } from "@/components/ui/Badge";
 import { formatDate } from "@/lib/format";
 import type { Atendimento, Campanha, Produto, Vendedor } from "@/types/database";
 import { AtendimentoForm } from "./AtendimentoForm";
@@ -54,13 +55,40 @@ export function AtendimentosView({ atendimentos, vendedores, campanhas, produtos
         header: "Lead",
         value: (r) => r.lead,
         render: (r) => (
-          <span className="block max-w-[260px] truncate font-medium" title={r.lead}>
-            {r.lead}
+          <span className="flex max-w-[300px] items-center gap-2">
+            <span className="truncate font-medium" title={r.lead}>
+              {r.lead}
+            </span>
+            {r.importado && (
+              <Badge tone="neutral" dot={false} className="shrink-0">
+                Importado
+              </Badge>
+            )}
           </span>
         ),
       },
-      { key: "porte", header: "Porte", value: (r) => r.porte, filter: "select", filterOptions: opts(PORTES) },
-      { key: "regime", header: "Regime", value: (r) => r.regime, filter: "select", filterOptions: opts(REGIMES) },
+      {
+        key: "cnpj",
+        header: "CNPJ",
+        value: (r) => r.cnpj ?? "",
+        render: (r) => (r.cnpj ? <span className="tabular-nums">{r.cnpj}</span> : <span className="text-fg-3">—</span>),
+      },
+      {
+        key: "porte",
+        header: "Porte",
+        value: (r) => r.porte,
+        filter: "select",
+        filterOptions: opts([...PORTES, NAO_INFORMADO]),
+        render: (r) => (r.porte === NAO_INFORMADO ? <span className="text-fg-3">{r.porte}</span> : r.porte),
+      },
+      {
+        key: "regime",
+        header: "Regime",
+        value: (r) => r.regime,
+        filter: "select",
+        filterOptions: opts([...REGIMES, NAO_INFORMADO]),
+        render: (r) => (r.regime === NAO_INFORMADO ? <span className="text-fg-3">{r.regime}</span> : r.regime),
+      },
       {
         key: "canal",
         header: "Canal",
@@ -103,6 +131,14 @@ export function AtendimentosView({ atendimentos, vendedores, campanhas, produtos
         filterOptions: vendedores.map((v) => ({ value: v.nome, label: v.nome })),
         render: (r) =>
           r.responsavel_id ? vendedorNome.get(r.responsavel_id) ?? "—" : <span className="text-fg-3">Sem responsável</span>,
+      },
+      {
+        key: "origem",
+        header: "Etiqueta",
+        value: (r) => (r.importado ? "Importado" : "—"),
+        filter: "select",
+        filterOptions: [{ value: "Importado", label: "Importado" }],
+        render: (r) => (r.importado ? <Badge tone="neutral" dot={false}>Importado</Badge> : <span className="text-fg-3">—</span>),
       },
     ],
     [vendedorNome, vendedores],
