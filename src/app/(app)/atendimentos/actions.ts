@@ -4,6 +4,12 @@ import { requirePerfil } from "@/lib/auth";
 import { cnpjValido } from "@/lib/cnpj";
 import type { Porte, Regime } from "@/lib/constants";
 
+/** Sócio/administrador do quadro societário (QSA) da Receita Federal. */
+export interface Socio {
+  nome: string;
+  qualificacao: string;
+}
+
 export interface DadosCnpj {
   cnpj: string;
   razaoSocial: string;
@@ -19,6 +25,12 @@ export interface DadosCnpj {
   municipioIbge: number | null;
   telefone: string;
   email: string;
+  /** CNAE principal (só dígitos). */
+  cnaeCodigo: string;
+  /** Quadro societário (QSA). Vazio para MEI/empresário individual. */
+  socios: Socio[];
+  /** Responsável sugerido: administrador do QSA ou, sem QSA, o titular (MEI/empresário individual). */
+  responsavel: string;
 }
 
 export type ResultadoCnpj = { ok: true; dados: DadosCnpj } | { ok: false; error: string };
@@ -28,7 +40,10 @@ interface BrasilApiCnpj {
   razao_social?: string;
   nome_fantasia?: string;
   descricao_situacao_cadastral?: string;
+  cnae_fiscal?: number | null;
   cnae_fiscal_descricao?: string;
+  codigo_natureza_juridica?: number | null;
+  qsa?: { nome_socio?: string; qualificacao_socio?: string }[] | null;
   porte?: string;
   opcao_pelo_mei?: boolean | null;
   opcao_pelo_simples?: boolean | null;
@@ -59,6 +74,30 @@ function regimeDe(d: BrasilApiCnpj): DadosCnpj["regime"] {
   return "";
 }
 
+const PALAVRAS_MINUSCULAS = new Set(["de", "da", "do", "das", "dos", "e"]);
+/** "MARIA DA SILVA" → "Maria da Silva" (a Receita entrega os nomes em caixa alta). */
+function nomeProprio(s: string) {
+  return s
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((p, i) => (i > 0 && PALAVRAS_MINUSCULAS.has(p) ? p : p.charAt(0).toUpperCase() + p.slice(1)))
+    .join(" ");
+}
+
+/** Administrador/diretor/presidente primeiro; senão, o primeiro do QSA. Sem QSA (MEI/EI), o titular é o nome da razão social. */
+function escolherResponsavel(socios: Socio[], razaoSocial: string, individual: boolean): string {
+  const prioridade = ["administrador", "presidente", "diretor", "titular", "sócio", "socio"];
+  for (const termo of prioridade) {
+    const achado = socios.find((s) => s.qualificacao.toLowerCase().includes(termo));
+    if (achado) return achado.nome;
+  }
+  if (socios[0]) return socios[0].nome;
+  // MEI/empresário individual: a razão social é "NOME DO TITULAR 12345678901"
+  if (individual) return nomeProprio(razaoSocial.replace(/\s+\d{5,}$/, ""));
+  return "";
+}
+
 /** A BrasilAPI (Cloudflare) recusa com 403 requisições sem User-Agent, como as do servidor. */
 const HEADERS = { Accept: "application/json", "User-Agent": "CRM-OSC-Paulistana/1.0 (+https://crm-comercial-xi.vercel.app)" };
 
@@ -83,6 +122,10 @@ async function buscar(url: string): Promise<{ json: unknown } | { falha: Falha }
 
 function dadosBrasilApi(d: BrasilApiCnpj): DadosCnpj {
   const telefone = (d.ddd_telefone_1 ?? "").replace(/\D/g, "");
+  const socios = (d.qsa ?? [])
+    .filter((x) => x.nome_socio?.trim())
+    .map((x) => ({ nome: nomeProprio(x.nome_socio!), qualificacao: (x.qualificacao_socio ?? "").trim() }));
+  const individual = Boolean(d.opcao_pelo_mei) || d.codigo_natureza_juridica === 2135;
   return {
     cnpj: d.cnpj,
     razaoSocial: (d.razao_social ?? "").trim(),
@@ -96,19 +139,24 @@ function dadosBrasilApi(d: BrasilApiCnpj): DadosCnpj {
     municipioIbge: d.codigo_municipio_ibge ?? null,
     telefone: telefone.length >= 10 ? telefone : "",
     email: (d.email ?? "").trim().toLowerCase(),
+    cnaeCodigo: String(d.cnae_fiscal ?? ""),
+    socios,
+    responsavel: escolherResponsavel(socios, (d.razao_social ?? "").trim(), individual),
   };
 }
 
 /** Alternativa (CNPJ.ws, base pública da Receita) para quando a BrasilAPI falhar. */
 interface CnpjWs {
   razao_social?: string;
+  natureza_juridica?: { id?: string } | null;
+  socios?: { nome?: string; qualificacao_socio?: { descricao?: string } | null }[] | null;
   porte?: { descricao?: string } | null;
   simples?: { simples?: string | null; mei?: string | null } | null;
   estabelecimento?: {
     cnpj?: string;
     nome_fantasia?: string | null;
     situacao_cadastral?: string | null;
-    atividade_principal?: { descricao?: string } | null;
+    atividade_principal?: { descricao?: string; subclasse?: string; id?: string } | null;
     estado?: { sigla?: string } | null;
     cidade?: { nome?: string; ibge_id?: number } | null;
     ddd1?: string | null;
@@ -132,6 +180,10 @@ function dadosCnpjWs(d: CnpjWs, digitos: string): DadosCnpj {
           ? "DEMAIS"
           : "";
   const telefone = `${e.ddd1 ?? ""}${e.telefone1 ?? ""}`.replace(/\D/g, "");
+  const socios = (d.socios ?? [])
+    .filter((x) => x.nome?.trim())
+    .map((x) => ({ nome: nomeProprio(x.nome!), qualificacao: (x.qualificacao_socio?.descricao ?? "").trim() }));
+  const individual = mei || d.natureza_juridica?.id === "2135";
   return {
     cnpj: digitos,
     razaoSocial: (d.razao_social ?? "").trim(),
@@ -145,6 +197,9 @@ function dadosCnpjWs(d: CnpjWs, digitos: string): DadosCnpj {
     municipioIbge: e.cidade?.ibge_id ?? null,
     telefone: telefone.length >= 10 ? telefone : "",
     email: (e.email ?? "").trim().toLowerCase(),
+    cnaeCodigo: (e.atividade_principal?.subclasse ?? e.atividade_principal?.id ?? "").replace(/\D/g, ""),
+    socios,
+    responsavel: escolherResponsavel(socios, (d.razao_social ?? "").trim(), individual),
   };
 }
 

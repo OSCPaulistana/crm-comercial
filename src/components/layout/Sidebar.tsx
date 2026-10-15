@@ -52,7 +52,7 @@ export function Sidebar({ nome, email, perfil }: { nome: string; email: string; 
         >
           <Menu className="size-5" />
         </button>
-        <span className="text-sm font-medium text-white">CRM Comercial</span>
+        <span className="size-9" />
         <span className="size-9" />
       </div>
 
@@ -79,7 +79,6 @@ export function Sidebar({ nome, email, perfil }: { nome: string; email: string; 
             <X className="size-4" />
           </button>
         </div>
-        <p className="px-5 pb-2 text-[11px] font-medium tracking-[0.08em] text-gray-500 uppercase">CRM Comercial</p>
 
         <nav className="flex-1 overflow-y-auto px-3 pb-4" aria-label="Módulos">
           {grupos.map((g) => (

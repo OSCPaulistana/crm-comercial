@@ -161,7 +161,7 @@ function converterEtapa(r) {
   if (etapa === "proposta_enviada" || etapa === "aguardando decisao" || etapa === "aguardando_decisao") return { status: "proposta_enviada", aviso: null };
   if (etapa === "negociacao") return { status: "visita_realizada", aviso: null };
   if (etapa === "qualificacao") return { status: "qualificacao", aviso: null };
-  return { status: "primeiro_contato", aviso: null };
+  return { status: "qualificacao", aviso: null };
 }
 
 /* ------------------------------------------------------------------ */

@@ -28,19 +28,27 @@ export type Canal = (typeof CANAIS)[number];
 
 export type Tone = "neutral" | "info" | "success" | "warning" | "danger";
 
+/**
+ * Funil de 7 etapas: Qualificação → Agendamento de Reunião → Reunião realizada → Elaboração da proposta →
+ * Aprovação da Diretoria → Envio ao cliente → Fechamento do negócio (efetivado ou declinado, etapa 0).
+ */
 export const STATUS = [
-  { value: "primeiro_contato", label: "Primeiro Contato", tone: "neutral", etapa: 1 },
-  { value: "qualificacao", label: "Qualificação", tone: "info", etapa: 2 },
-  { value: "agendado_visita", label: "Agendado Visita", tone: "info", etapa: 3 },
-  { value: "visita_realizada", label: "Visita Realizada", tone: "info", etapa: 4 },
-  { value: "proposta_enviada", label: "Proposta Enviada", tone: "warning", etapa: 5 },
-  { value: "negocio_efetivado", label: "Negócio Efetivado", tone: "success", etapa: 6 },
+  { value: "qualificacao", label: "Qualificação", tone: "info", etapa: 1 },
+  { value: "agendado_visita", label: "Agendamento de Reunião", tone: "info", etapa: 2 },
+  { value: "visita_realizada", label: "Reunião Realizada", tone: "info", etapa: 3 },
+  { value: "elaboracao_proposta", label: "Elaboração da Proposta", tone: "warning", etapa: 4 },
+  { value: "aprovacao_diretoria", label: "Aprovação da Diretoria", tone: "warning", etapa: 5 },
+  { value: "proposta_enviada", label: "Envio ao Cliente", tone: "warning", etapa: 6 },
+  { value: "negocio_efetivado", label: "Negócio Efetivado", tone: "success", etapa: 7 },
   { value: "negocio_declinado", label: "Negócio Declinado", tone: "danger", etapa: 0 },
 ] as const satisfies readonly { value: string; label: string; tone: Tone; etapa: number }[];
 
-export type StatusAtendimento = (typeof STATUS)[number]["value"];
+/** Status que só existe em históricos antigos (hoje incorporado à Qualificação). Não é opção de escolha. */
+const STATUS_LEGADO = [{ value: "primeiro_contato", label: "Primeiro Contato", tone: "neutral", etapa: 1 }] as const;
 
-export const STATUS_MAP = Object.fromEntries(STATUS.map((s) => [s.value, s])) as Record<
+export type StatusAtendimento = (typeof STATUS)[number]["value"] | (typeof STATUS_LEGADO)[number]["value"];
+
+export const STATUS_MAP = Object.fromEntries([...STATUS, ...STATUS_LEGADO].map((s) => [s.value, s])) as Record<
   StatusAtendimento,
   { value: StatusAtendimento; label: string; tone: Tone; etapa: number }
 >;
@@ -50,15 +58,20 @@ export const STATUS_EM_ANDAMENTO: StatusAtendimento[] = [
   "qualificacao",
   "agendado_visita",
   "visita_realizada",
+  "elaboracao_proposta",
+  "aprovacao_diretoria",
   "proposta_enviada",
 ];
 
 /** Etapas do funil (usadas com etapa_maxima do atendimento). */
-export const ETAPA_QUALIFICACAO = 2;
-/** A partir daqui (agendar visita em diante) o checklist de qualificação é obrigatório. */
-export const ETAPA_AGENDADO = 3;
-export const ETAPA_VISITA = 4;
-export const ETAPA_FECHADO = 6;
+export const ETAPA_QUALIFICACAO = 1;
+/** A partir daqui (agendar reunião em diante) o checklist de qualificação é obrigatório. */
+export const ETAPA_AGENDADO = 2;
+export const ETAPA_VISITA = 3;
+export const ETAPA_PROPOSTA = 4;
+export const ETAPA_APROVACAO = 5;
+export const ETAPA_ENVIADA = 6;
+export const ETAPA_FECHADO = 7;
 
 export const MOTIVOS_DECLINIO = ["Honorários", "Trava contratual com a contabilidade atual", "Outro"] as const;
 

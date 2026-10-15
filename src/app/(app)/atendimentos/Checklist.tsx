@@ -17,6 +17,14 @@ export interface ChecklistValores {
   q_contabilidade: string;
   q_dor: string;
   q_produtos: string[];
+  /** Redes sociais (opcionais). */
+  q_linkedin: string;
+  q_instagram: string;
+  q_facebook: string;
+  /** Restaurante: abre as perguntas sobre o sistema de frente de caixa e o ERP financeiro. */
+  q_restaurante: "" | "sim" | "nao";
+  q_pdv: string;
+  q_erp: string;
 }
 
 export type ChecklistErros = Partial<Record<keyof ChecklistValores, string>>;
@@ -30,7 +38,19 @@ export const CHECKLIST_VAZIO: ChecklistValores = {
   q_contabilidade: "",
   q_dor: "",
   q_produtos: [],
+  q_linkedin: "",
+  q_instagram: "",
+  q_facebook: "",
+  q_restaurante: "",
+  q_pdv: "",
+  q_erp: "",
 };
+
+/** A atividade descrita lembra um restaurante? (usado só para sugerir a resposta). */
+export const pareceRestaurante = (atividade: string) => /restaurante/i.test(atividade);
+
+/** CNAE de restaurantes e similares (5611-2/01, 5611-2/03, 5611-2/04, 5611-2/05). */
+export const cnaeRestaurante = (cnae: string) => cnae.startsWith("5611");
 
 export function checklistDe(a: Atendimento | null): ChecklistValores {
   if (!a) return CHECKLIST_VAZIO;
@@ -46,6 +66,12 @@ export function checklistDe(a: Atendimento | null): ChecklistValores {
     q_contabilidade: a.qualif_contabilidade_anterior ?? "",
     q_dor: a.qualif_principal_dor ?? "",
     q_produtos: a.qualif_produtos ?? [],
+    q_linkedin: a.qualif_linkedin ?? "",
+    q_instagram: a.qualif_instagram ?? "",
+    q_facebook: a.qualif_facebook ?? "",
+    q_restaurante: a.qualif_restaurante === true ? "sim" : a.qualif_restaurante === false ? "nao" : "",
+    q_pdv: a.qualif_pdv_sistema ?? "",
+    q_erp: a.qualif_erp_financeiro ?? "",
   };
 }
 
@@ -59,10 +85,16 @@ export function checklistPendencias(v: ChecklistValores): (keyof ChecklistValore
   if (!v.q_contabilidade.trim()) out.push("q_contabilidade");
   if (!v.q_dor.trim()) out.push("q_dor");
   if (v.q_produtos.length === 0) out.push("q_produtos");
+  // restaurante: sistema da frente de caixa e ERP financeiro também são obrigatórios
+  if (v.q_restaurante === "sim") {
+    if (!v.q_pdv.trim()) out.push("q_pdv");
+    if (!v.q_erp.trim()) out.push("q_erp");
+  }
   return out;
 }
 
-export const CHECKLIST_TOTAL = 7;
+/** Quantidade de itens obrigatórios (7, mais 2 quando é restaurante). */
+export const checklistTotal = (v: ChecklistValores) => 7 + (v.q_restaurante === "sim" ? 2 : 0);
 
 const MSG: Record<keyof ChecklistValores, string> = {
   q_atividade: "Informe a atividade.",
@@ -73,6 +105,12 @@ const MSG: Record<keyof ChecklistValores, string> = {
   q_contabilidade: "Informe a contabilidade anterior.",
   q_dor: "Descreva a principal dor hoje.",
   q_produtos: "Selecione ao menos um produto/serviço.",
+  q_linkedin: "", // opcionais: nunca são pendência
+  q_instagram: "",
+  q_facebook: "",
+  q_restaurante: "",
+  q_pdv: "Informe o sistema da frente de caixa (PDV).",
+  q_erp: "Informe o ERP financeiro.",
 };
 
 export function checklistErros(v: ChecklistValores): ChecklistErros {
@@ -92,6 +130,13 @@ export function checklistParaBanco(v: ChecklistValores) {
     qualif_contabilidade_anterior: v.q_contabilidade.trim() || null,
     qualif_principal_dor: v.q_dor.trim() || null,
     qualif_produtos: v.q_produtos,
+    qualif_linkedin: v.q_linkedin.trim() || null,
+    qualif_instagram: v.q_instagram.trim() || null,
+    qualif_facebook: v.q_facebook.trim() || null,
+    qualif_restaurante: v.q_restaurante === "" ? null : v.q_restaurante === "sim",
+    // sistemas só valem para restaurante
+    qualif_pdv_sistema: v.q_restaurante === "sim" ? v.q_pdv.trim() || null : null,
+    qualif_erp_financeiro: v.q_restaurante === "sim" ? v.q_erp.trim() || null : null,
   };
 }
 
@@ -111,6 +156,7 @@ export function Checklist({
   obrigatorio: boolean;
 }) {
   const faltam = checklistPendencias(valores).length;
+  const total = checklistTotal(valores);
   const completo = faltam === 0;
 
   return (
@@ -129,7 +175,7 @@ export function Checklist({
           </span>
         ) : (
           <span className="text-xs font-medium text-fg-2">
-            {CHECKLIST_TOTAL - faltam} de {CHECKLIST_TOTAL} itens · todos obrigatórios para avançar
+            {total - faltam} de {total} itens · todos obrigatórios para avançar
           </span>
         )}
       </div>
@@ -200,6 +246,42 @@ export function Checklist({
           placeholder="Nome do escritório atual ou anterior"
           wrapperClassName="sm:col-span-2"
         />
+        <Select
+          label="É um restaurante?"
+          value={valores.q_restaurante}
+          onChange={(e) => onChange({ q_restaurante: e.target.value as ChecklistValores["q_restaurante"] })}
+          placeholder="Não informado"
+          options={[
+            { value: "sim", label: "Sim" },
+            { value: "nao", label: "Não" },
+          ]}
+          hint={valores.q_restaurante === "sim" ? undefined : "Se for, pergunte o sistema do caixa e o ERP financeiro."}
+          wrapperClassName="sm:col-span-6"
+        />
+        {valores.q_restaurante === "sim" && (
+          <>
+            <Input
+              label="Sistema da frente de caixa (PDV)"
+              required
+              value={valores.q_pdv}
+              onChange={(e) => onChange({ q_pdv: e.target.value })}
+              error={erros.q_pdv}
+              maxLength={150}
+              placeholder="Ex.: Saipos, Consumer, Linx, Goomer"
+              wrapperClassName="sm:col-span-3"
+            />
+            <Input
+              label="ERP financeiro"
+              required
+              value={valores.q_erp}
+              onChange={(e) => onChange({ q_erp: e.target.value })}
+              error={erros.q_erp}
+              maxLength={150}
+              placeholder="Ex.: Omie, Conta Azul, Bling, nenhum"
+              wrapperClassName="sm:col-span-3"
+            />
+          </>
+        )}
         <Textarea
           label="Principal dor hoje"
           required
@@ -222,6 +304,33 @@ export function Checklist({
             invalid={Boolean(erros.q_produtos)}
           />
         </Field>
+        <fieldset className="grid grid-cols-1 gap-4 border-t border-line pt-4 sm:col-span-6 sm:grid-cols-3">
+          <legend className="mb-2 text-xs font-semibold tracking-wide text-fg-2 uppercase">Redes sociais (opcional)</legend>
+          <Input
+            label="LinkedIn"
+            value={valores.q_linkedin}
+            onChange={(e) => onChange({ q_linkedin: e.target.value })}
+            maxLength={200}
+            placeholder="linkedin.com/company/..."
+            autoComplete="off"
+          />
+          <Input
+            label="Instagram"
+            value={valores.q_instagram}
+            onChange={(e) => onChange({ q_instagram: e.target.value })}
+            maxLength={200}
+            placeholder="@usuario ou link do perfil"
+            autoComplete="off"
+          />
+          <Input
+            label="Facebook"
+            value={valores.q_facebook}
+            onChange={(e) => onChange({ q_facebook: e.target.value })}
+            maxLength={200}
+            placeholder="facebook.com/..."
+            autoComplete="off"
+          />
+        </fieldset>
       </div>
     </div>
   );

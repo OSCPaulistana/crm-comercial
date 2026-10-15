@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Ban, FileText, History, Loader2, MoveRight, Pencil, RefreshCcw, Search, Shuffle, Trash2 } from "lucide-react";
+import { Ban, FileDown, FileText, History, Loader2, MoveRight, Pencil, RefreshCcw, Search, Shuffle, ShieldCheck, Trash2, Undo2 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Field, Input, Select, Textarea } from "@/components/ui/Field";
@@ -14,10 +14,11 @@ import { UfMunicipioFields } from "@/components/UfMunicipioFields";
 import { createClient } from "@/lib/supabase/client";
 import { cnpjValido } from "@/lib/cnpj";
 import { fetchMunicipios } from "@/lib/ibge";
-import { consultarCnpj } from "./actions";
+import { consultarCnpj, type Socio } from "./actions";
 import {
   CANAIS,
   ETAPA_AGENDADO,
+  ETAPA_FECHADO,
   GIRO_INTERVALO_DIAS,
   MOTIVOS_DECLINIO,
   NAO_INFORMADO,
@@ -50,10 +51,13 @@ import {
   checklistErros,
   checklistParaBanco,
   checklistPendencias,
+  cnaeRestaurante,
+  pareceRestaurante,
   type ChecklistErros,
   type ChecklistValores,
 } from "./Checklist";
 import { EtapaDetalhe } from "./EtapaDetalhe";
+import { PropostaItensEditor, PropostaResumo, montarItens, totaisProposta, valoresIniciais, type ValoresPorProduto } from "./Proposta";
 import { AnexosPicker, EtapasStepper, MeioContatoPicker, TimelineList, type HistoricoRow, type NotaRow } from "./Timeline";
 
 interface Props {
@@ -81,6 +85,8 @@ type FormState = {
   email: string;
   cnpj: string;
   contato_nome: string;
+  /** Responsável (sócio/administrador) da empresa — sugerido pelo QSA da Receita Federal. */
+  responsavel_empresa: string;
   porte: string;
   regime: string;
   canal: string;
@@ -99,6 +105,9 @@ type FormState = {
   data_visita: string;
   tipo_visita: TipoVisita | "";
   proposta_produtos: string[];
+  /** Valor digitado para cada serviço da proposta. */
+  proposta_valores: ValoresPorProduto;
+  /** Total da proposta (soma dos valores por serviço), como texto mascarado. */
   proposta_valor: string;
   data_proposta: string;
   conforme_proposta: "" | "sim" | "nao";
@@ -117,6 +126,7 @@ function initialState(a: Atendimento | null, meuVendedorId: string | null): Form
     email: a?.email ?? "",
     cnpj: a?.cnpj ?? "",
     contato_nome: a?.contato_nome ?? "",
+    responsavel_empresa: a?.responsavel_empresa ?? "",
     // "Não informado" (leads importados) é tratado como pendente: a tela exige escolher um valor real
     porte: a?.porte && a.porte !== NAO_INFORMADO ? a.porte : "",
     regime: a?.regime && a.regime !== NAO_INFORMADO ? a.regime : "",
@@ -126,7 +136,7 @@ function initialState(a: Atendimento | null, meuVendedorId: string | null): Form
     municipio: a?.municipio ?? "",
     municipio_ibge: a?.municipio_ibge ?? null,
     meio_contato_inicial: a?.meio_contato_inicial ?? "",
-    status: a?.status ?? "primeiro_contato",
+    status: a?.status ?? "qualificacao",
     responsavel_id: a?.responsavel_id ?? meuVendedorId ?? "",
     campanha_id: a?.campanha_id ?? "",
     // novo registro da linha do tempo: sempre começa em branco
@@ -134,6 +144,7 @@ function initialState(a: Atendimento | null, meuVendedorId: string | null): Form
     data_visita: a?.data_visita ?? "",
     tipo_visita: a?.tipo_visita ?? "",
     proposta_produtos: a?.proposta_produtos ?? [],
+    proposta_valores: valoresIniciais(a),
     proposta_valor: moneyToInput(a?.proposta_valor),
     data_proposta: a?.data_proposta ?? "",
     conforme_proposta: a?.conforme_proposta === true ? "sim" : a?.conforme_proposta === false ? "nao" : "",
@@ -161,11 +172,11 @@ const CAMPOS_LEAD = [
 
 type Erros = Partial<Record<keyof FormState, string>>;
 
-/** O checklist de qualificação é obrigatório para entrar em Agendado Visita ou etapas seguintes. */
+/** O checklist de qualificação é obrigatório para entrar em Agendamento de Reunião ou etapas seguintes. */
 const exigeChecklist = (s: StatusAtendimento) => STATUS_MAP[s].etapa >= ETAPA_AGENDADO;
 
 /** Campos do lead preenchidos pela consulta do CNPJ (para não sobrescrever o que a pessoa digitou). */
-type AutoPreenchido = Partial<Record<"lead" | "porte" | "regime" | "telefone" | "email" | "municipio", string>>;
+type AutoPreenchido = Partial<Record<"lead" | "porte" | "regime" | "telefone" | "email" | "municipio" | "responsavel", string>>;
 type StatusCnpj = { estado: "idle" | "carregando" | "ok" | "aviso" | "erro"; msg: string };
 
 const PALAVRAS_MINUSCULAS = new Set(["de", "da", "do", "das", "dos", "e"]);
@@ -220,6 +231,12 @@ function AtendimentoFormInner({
   const [notaExcluir, setNotaExcluir] = useState<NotaRow | null>(null);
   const [recarregar, setRecarregar] = useState(0);
   const [cnpjStatus, setCnpjStatus] = useState<StatusCnpj>({ estado: "idle", msg: "" });
+  /** Quadro societário (QSA) da última consulta de CNPJ: sugestões para o responsável da empresa. */
+  const [socios, setSocios] = useState<Socio[]>([]);
+  const [aprovadoPorNome, setAprovadoPorNome] = useState("");
+  const [gerandoPdf, setGerandoPdf] = useState(false);
+  /** Aprovar a proposta (e qualquer envio ao cliente sem aprovação) é só de gestores: administrador e gerente. */
+  const ehGestor = podeExcluir;
   /** CNPJ (só dígitos) cuja consulta está valendo; respostas de CNPJs antigos são descartadas. */
   const cnpjConsultado = useRef("");
   const autoPreenchido = useRef<AutoPreenchido>({});
@@ -252,13 +269,34 @@ function AtendimentoFormInner({
     };
   }, [atendimento, supabase, recarregar]);
 
+  useEffect(() => {
+    const id = atendimento?.aprovado_por;
+    if (!id) {
+      setAprovadoPorNome("");
+      return;
+    }
+    let alive = true;
+    (async () => {
+      const { data } = await supabase.from("profiles").select("nome").eq("id", id).maybeSingle();
+      if (alive) setAprovadoPorNome((data as { nome: string } | null)?.nome ?? "");
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [atendimento?.aprovado_por, supabase]);
+
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => {
     setF((s) => ({ ...s, [k]: v }));
     setErrors((e) => ({ ...e, [k]: undefined }));
   };
 
   const mudarChecklist = (patch: Partial<ChecklistValores>) => {
-    setChk((s) => ({ ...s, ...patch }));
+    setChk((s) => {
+      const n = { ...s, ...patch };
+      // atividade que lembra restaurante: já sugere a resposta (a pessoa pode trocar)
+      if (patch.q_atividade !== undefined && s.q_restaurante === "" && pareceRestaurante(patch.q_atividade)) n.q_restaurante = "sim";
+      return n;
+    });
     setChkErros((e) => {
       const n = { ...e };
       for (const k of Object.keys(patch) as (keyof ChecklistValores)[]) delete n[k];
@@ -274,10 +312,18 @@ function AtendimentoFormInner({
   const statusPainel: StatusAtendimento = statusOriginal ?? f.status;
   const etapaOriginal = statusOriginal ? STATUS_MAP[statusOriginal].etapa : 0;
   const temProposta = parseMoney(f.proposta_valor) > 0;
+  /** Proposta antiga (só com o total, sem valor por serviço) ainda não detalhada: não cobra o detalhamento ao salvar. */
+  const propostaLegadaIntacta =
+    atendimento !== null &&
+    (atendimento.proposta_itens ?? []).length === 0 &&
+    Number(atendimento.proposta_valor ?? 0) > 0 &&
+    f.proposta_produtos.every((id) => !f.proposta_valores[id]);
   const checklistCompleto = checklistPendencias(chk).length === 0;
 
   // Próxima etapa do funil (a seguinte à etapa atual do atendimento)
-  const proxima = statusOriginal && etapaOriginal > 0 && etapaOriginal < 6 ? STATUS.find((s) => s.etapa === etapaOriginal + 1) : null;
+  const proxima = statusOriginal && etapaOriginal > 0 && etapaOriginal < ETAPA_FECHADO ? STATUS.find((s) => s.etapa === etapaOriginal + 1) : null;
+  /** Só gestor aprova a proposta: o vendedor fica aguardando. */
+  const aguardandoAprovacao = statusOriginal === "aprovacao_diretoria" && !ehGestor;
   const podeDeclinar = statusOriginal !== null && statusOriginal !== "negocio_declinado" && statusOriginal !== "negocio_efetivado";
 
   const temRegistro = Boolean(f.observacao_etapa.trim() || arquivos.length);
@@ -340,11 +386,14 @@ function AtendimentoFormInner({
   /** O que a etapa `s` exige. */
   function errosEtapa(s: StatusAtendimento): Erros {
     const e: Erros = {};
-    if (s === "agendado_visita" && !f.data_visita) e.data_visita = "Informe a data da visita agendada.";
+    if (s === "agendado_visita" && !f.data_visita) e.data_visita = "Informe a data da reunião agendada.";
     if (s === "visita_realizada" && !f.tipo_visita) e.tipo_visita = "Informe se foi visita ou reunião no escritório.";
-    if (s === "proposta_enviada") {
+    // a proposta precisa estar elaborada (serviços e valor de cada um) para ir à aprovação, ao cliente ou ao fechamento
+    if (s === "aprovacao_diretoria" || s === "proposta_enviada") {
       if (f.proposta_produtos.length === 0) e.proposta_produtos = "Selecione ao menos um serviço/pacote.";
-      if (parseMoney(f.proposta_valor) <= 0) e.proposta_valor = "Informe o valor total da proposta.";
+      else if (!propostaLegadaIntacta && f.proposta_produtos.some((id) => parseMoney(f.proposta_valores[id] ?? "") <= 0))
+        e.proposta_valor = "Informe o valor de cada serviço.";
+      else if (parseMoney(f.proposta_valor) <= 0) e.proposta_valor = "Informe o valor da proposta.";
     }
     if (s === "negocio_efetivado") {
       const conforme = temProposta && f.conforme_proposta === "sim";
@@ -438,6 +487,7 @@ function AtendimentoFormInner({
     const fechouConforme = alvo === "negocio_efetivado" && temProposta && f.conforme_proposta === "sim";
     const proposta = {
       proposta_produtos: f.proposta_produtos,
+      proposta_itens: propostaLegadaIntacta ? [] : montarItens(f.proposta_produtos, f.proposta_valores, produtos),
       proposta_valor: temProposta ? parseMoney(f.proposta_valor) : null,
       data_proposta: temProposta ? f.data_proposta || null : null,
     };
@@ -463,6 +513,7 @@ function AtendimentoFormInner({
       email: f.email.trim() || null,
       cnpj: f.cnpj ? maskCnpj(f.cnpj) : null,
       contato_nome: f.contato_nome.trim() || null,
+      responsavel_empresa: f.responsavel_empresa.trim() || null,
       porte: f.porte,
       regime: f.regime,
       canal: f.canal,
@@ -540,7 +591,9 @@ function AtendimentoFormInner({
         : mudou
           ? alvo === "negocio_declinado"
             ? "Negócio declinado."
-            : avancou
+            : statusOriginal === "aprovacao_diretoria" && alvo === "proposta_enviada"
+              ? "Proposta aprovada e liberada para o envio ao cliente."
+              : avancou
               ? `Etapa concluída. O lead agora está em ${STATUS_MAP[alvo].label}.`
               : `Lead movido para ${STATUS_MAP[alvo].label}.`
           : temRegistro
@@ -685,6 +738,7 @@ function AtendimentoFormInner({
       if (d.regime && livre("regime", s.regime)) n.regime = novo.regime = d.regime;
       if (d.telefone && livre("telefone", s.telefone)) n.telefone = novo.telefone = maskPhone(d.telefone);
       if (d.email && livre("email", s.email)) n.email = novo.email = d.email;
+      if (d.responsavel && livre("responsavel", s.responsavel_empresa)) n.responsavel_empresa = novo.responsavel = d.responsavel;
       if (d.uf && municipio && livre("municipio", s.municipio)) {
         n.uf = d.uf;
         n.municipio = novo.municipio = municipio;
@@ -693,6 +747,9 @@ function AtendimentoFormInner({
       return n;
     });
     autoPreenchido.current = novo;
+    setSocios(d.socios);
+    // CNAE de restaurante: já sugere "É um restaurante?" na qualificação (se ainda não foi respondido)
+    if (cnaeRestaurante(d.cnaeCodigo)) setChk((c) => (c.q_restaurante === "" ? { ...c, q_restaurante: "sim" } : c));
     setErrors((e) => ({ ...e, cnpj: undefined, lead: undefined, porte: undefined, regime: undefined, uf: undefined, municipio: undefined }));
 
     const pendentes = [!d.porte && "porte", !d.regime && "regime"].filter(Boolean).join(" e ");
@@ -703,8 +760,51 @@ function AtendimentoFormInner({
         `Receita Federal: ${d.razaoSocial || nome}` +
         (d.situacao ? ` · situação ${d.situacao.toLowerCase()}` : "") +
         (inativa ? ". Atenção: o CNPJ não está ativo." : ".") +
-        (pendentes ? ` Não foi possível identificar ${pendentes}: selecione manualmente.` : " Confira os campos preenchidos."),
+        (pendentes ? ` Não foi possível identificar ${pendentes}: selecione manualmente.` : " Confira os campos preenchidos.") +
+        (d.responsavel ? ` Responsável sugerido: ${d.responsavel}.` : ""),
     });
+  }
+
+  /** Serviços e valores da proposta: o total é sempre a soma dos valores informados. */
+  const mudarProposta = (ids: string[], valores: ValoresPorProduto) => {
+    const total = totaisProposta(montarItens(ids, valores, produtos)).total;
+    setF((x) => ({ ...x, proposta_produtos: ids, proposta_valores: valores, proposta_valor: total > 0 ? moneyToInput(total) : "" }));
+    setErrors((e) => ({ ...e, proposta_produtos: undefined, proposta_valor: undefined }));
+  };
+
+  /** Gera o PDF do atendimento (dados gravados até a etapa atual, etapas que faltam e histórico). */
+  async function gerarPdf() {
+    if (!atendimento) return;
+    setGerandoPdf(true);
+    try {
+      const { gerarPdfAtendimento } = await import("@/lib/pdf-atendimento");
+      await gerarPdfAtendimento({
+        atendimento,
+        produtos,
+        vendedor: atendimento.responsavel_id ? vendedorNome(atendimento.responsavel_id) : "",
+        campanha: atendimento.campanha_id ? campanhaNome(atendimento.campanha_id) : "",
+        aprovadoPor: aprovadoPorNome,
+        historico: historico.map((h) => ({
+          status_anterior: h.status_anterior,
+          status_novo: h.status_novo,
+          created_at: h.created_at,
+          usuario: h.profiles?.nome ?? "",
+        })),
+        notas: notas.map((n) => ({
+          id: n.id,
+          status: n.status,
+          meio_contato: n.meio_contato,
+          texto: n.texto,
+          created_at: n.created_at,
+          usuario: n.profiles?.nome ?? "",
+          anexos: anexos.filter((a) => a.nota_id === n.id).map((a) => a.nome),
+        })),
+      });
+    } catch {
+      toast.error("Não foi possível gerar o PDF.", "Tente novamente em instantes.");
+    } finally {
+      setGerandoPdf(false);
+    }
   }
 
   const onCnpj = (valor: string) => {
@@ -797,6 +897,27 @@ function AtendimentoFormInner({
         wrapperClassName="sm:col-span-6"
         maxLength={200}
       />
+      <div className="sm:col-span-6">
+        <Input
+          label="Responsável da empresa"
+          list="socios-list"
+          value={f.responsavel_empresa}
+          onChange={(e) => set("responsavel_empresa", e.target.value)}
+          maxLength={150}
+          autoComplete="off"
+          placeholder="Sócio ou administrador"
+          hint={
+            socios.length > 0
+              ? "Sugerido pelo quadro societário (QSA) da Receita Federal. Escolha outro sócio na lista, se preferir."
+              : "Preenchido automaticamente a partir do QSA ao informar o CNPJ."
+          }
+        />
+        <datalist id="socios-list">
+          {socios.map((x) => (
+            <option key={x.nome} value={x.nome} label={x.qualificacao || undefined} />
+          ))}
+        </datalist>
+      </div>
       <Input
         label="Telefone"
         inputMode="tel"
@@ -917,7 +1038,10 @@ function AtendimentoFormInner({
   const camposEtapa = (s: StatusAtendimento) => {
     const agendado = s === "agendado_visita";
     const visita = s === "visita_realizada";
-    const proposta = s === "proposta_enviada";
+    const elaboracao = s === "elaboracao_proposta";
+    const aprovacao = s === "aprovacao_diretoria";
+    const enviada = s === "proposta_enviada";
+    const proposta = elaboracao || aprovacao || enviada;
     const efetivado = s === "negocio_efetivado";
     const declinado = s === "negocio_declinado";
     const conforme = efetivado && temProposta && f.conforme_proposta === "sim";
@@ -975,36 +1099,52 @@ function AtendimentoFormInner({
           />
         )}
 
+        {aprovacao && (
+          <div className="rounded-[10px] border border-[#fde68a] bg-warning-soft/60 p-4">
+            <p className="flex items-center gap-2 text-sm font-medium text-fg">
+              <ShieldCheck className="size-4 text-warning" aria-hidden /> Aprovação da Diretoria
+            </p>
+            <p className="mt-1 text-[13px] text-fg-2">
+              {ehGestor
+                ? "Revise a proposta abaixo. Ao aprovar, o lead segue para o envio ao cliente e a aprovação fica registrada com o seu nome e a data. Para pedir ajustes, devolva a proposta para elaboração."
+                : "A proposta aguarda a aprovação da Diretoria ou de um gestor. Somente Administrador ou Gerente pode aprová-la."}
+            </p>
+          </div>
+        )}
+
         {proposta && (
           <div className="grid grid-cols-1 gap-4 rounded-[10px] border border-[#fde68a] bg-warning-soft/60 p-4 sm:grid-cols-3">
             <p className="flex items-center gap-2 text-sm font-medium text-fg sm:col-span-3">
               <FileText className="size-4 text-warning" aria-hidden /> Dados da proposta
             </p>
-            <Field
-              label="Serviços / pacotes propostos"
-              required
-              error={errors.proposta_produtos}
-              hint="Pode selecionar mais de um serviço."
-              className="sm:col-span-3"
-              htmlFor="proposta-produtos"
-            >
-              <MultiSelect
-                id="proposta-produtos"
-                options={produtoOptions(f.proposta_produtos)}
-                value={f.proposta_produtos}
-                onChange={(v) => set("proposta_produtos", v)}
-                placeholder={produtos.length ? "Selecione um ou mais" : "Nenhum serviço cadastrado"}
-                pluralLabel="serviços"
-                invalid={Boolean(errors.proposta_produtos)}
-              />
-            </Field>
-            {moneyField("proposta_valor", "Valor total proposto (R$)", "Entra na projeção de faturamento do dashboard.", "sm:col-span-2")}
-            <Input
-              label="Data da proposta"
-              type="date"
-              value={f.data_proposta || todayISO()}
-              onChange={(e) => set("data_proposta", e.target.value)}
+            <PropostaItensEditor
+              produtos={produtos}
+              selecionados={f.proposta_produtos}
+              valores={f.proposta_valores}
+              onChange={mudarProposta}
+              erroProdutos={errors.proposta_produtos}
+              erroValores={errors.proposta_valor}
             />
+            {propostaLegadaIntacta && (
+              <p className="text-xs text-fg-2 sm:col-span-3">
+                Proposta registrada só com o total ({formatBRL(parseMoney(f.proposta_valor))}). Informe o valor de cada serviço para detalhá-la.
+              </p>
+            )}
+            {enviada && (
+              <Input
+                label="Data de envio ao cliente"
+                type="date"
+                value={f.data_proposta || todayISO()}
+                onChange={(e) => set("data_proposta", e.target.value)}
+                wrapperClassName="max-w-xs"
+              />
+            )}
+            {enviada && atendimento?.data_aprovacao && (
+              <p className="flex items-center gap-1.5 text-xs text-fg-2 sm:col-span-3">
+                <ShieldCheck className="size-3.5 text-success" aria-hidden />
+                Aprovada{aprovadoPorNome ? ` por ${aprovadoPorNome}` : ""} em {formatDate(atendimento.data_aprovacao)}.
+              </p>
+            )}
           </div>
         )}
 
@@ -1180,6 +1320,17 @@ function AtendimentoFormInner({
                 Excluir
               </Button>
             )}
+            {editing && (
+              <Button
+                variant="secondary"
+                icon={<FileDown className="size-4" />}
+                onClick={gerarPdf}
+                loading={gerandoPdf}
+                title="Gera o PDF com os dados salvos do atendimento"
+              >
+                Gerar PDF
+              </Button>
+            )}
             <Button variant="secondary" onClick={onClose}>
               {editing ? "Fechar" : "Cancelar"}
             </Button>
@@ -1235,6 +1386,7 @@ function AtendimentoFormInner({
             ) : (
               <dl className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-[10px] bg-gray-50 p-4 text-sm sm:grid-cols-3">
                 <Info label="CNPJ" value={f.cnpj || "—"} />
+                <Info label="Responsável da empresa" value={f.responsavel_empresa || "—"} />
                 <Info label="Contato" value={f.contato_nome || "—"} />
                 <Info label="Porte / Regime" value={`${f.porte || NAO_INFORMADO} · ${f.regime || NAO_INFORMADO}`} />
                 <Info label="Canal" value={f.canal === "Indicação" && f.indicado_por ? `Indicação — ${f.indicado_por}` : f.canal} />
@@ -1258,6 +1410,7 @@ function AtendimentoFormInner({
               anexos={anexos}
               links={links}
               emAndamento={verEtapa === atendimento.status}
+              aprovadoPor={aprovadoPorNome}
               onVoltar={() => setVerEtapa(null)}
             />
           ) : editing && atendimento ? (
@@ -1279,9 +1432,28 @@ function AtendimentoFormInner({
               <div className="mt-5 border-t border-line pt-4">
                 <p className="mb-2.5 text-xs font-semibold tracking-wide text-fg-2 uppercase">Mudar de etapa</p>
                 <div className="flex flex-wrap gap-2">
-                  {proxima && (
-                    <Button icon={<MoveRight className="size-4" />} onClick={() => iniciarMovimento("avancar", proxima.value)} loading={saving && !mover}>
-                      Concluir etapa e avançar para {proxima.label}
+                  {proxima && !aguardandoAprovacao && (
+                    <Button
+                      icon={statusOriginal === "aprovacao_diretoria" ? <ShieldCheck className="size-4" /> : <MoveRight className="size-4" />}
+                      onClick={() => iniciarMovimento("avancar", proxima.value)}
+                      loading={saving && !mover}
+                    >
+                      {statusOriginal === "aprovacao_diretoria"
+                        ? `Aprovar proposta e avançar para ${proxima.label}`
+                        : `Concluir etapa e avançar para ${proxima.label}`}
+                    </Button>
+                  )}
+                  {statusOriginal === "aprovacao_diretoria" && ehGestor && (
+                    <Button
+                      variant="secondary"
+                      icon={<Undo2 className="size-4" />}
+                      onClick={() => {
+                        setObsDestino("");
+                        setErroAlvo("");
+                        setMover({ modo: "mover", alvo: "elaboracao_proposta" });
+                      }}
+                    >
+                      Devolver para elaboração
                     </Button>
                   )}
                   {podeDeclinar && (
@@ -1298,6 +1470,12 @@ function AtendimentoFormInner({
                     {atendimento.status === "negocio_declinado" ? "Reabrir em outra etapa" : "Mover para outra etapa"}
                   </Button>
                 </div>
+                {aguardandoAprovacao && (
+                  <p className="mt-2 flex items-center gap-1.5 text-xs text-fg-2">
+                    <ShieldCheck className="size-3.5 text-warning" aria-hidden />
+                    Aguardando aprovação da Diretoria ou de um gestor para seguir ao envio ao cliente.
+                  </p>
+                )}
               </div>
             </section>
           ) : (
@@ -1312,7 +1490,10 @@ function AtendimentoFormInner({
                     set("status", e.target.value as StatusAtendimento);
                     setChkErros({});
                   }}
-                  options={STATUS.map((s) => ({ value: s.value, label: s.label }))}
+                  options={STATUS.filter((s) => s.value !== "aprovacao_diretoria" && s.value !== "proposta_enviada").map((s) => ({
+                    value: s.value,
+                    label: s.label,
+                  }))}
                   wrapperClassName="max-w-xs"
                 />
                 {camposEtapa(f.status)}
@@ -1376,7 +1557,11 @@ function AtendimentoFormInner({
                 setMover({ modo: "mover", alvo: e.target.value as StatusAtendimento | "" });
               }}
               placeholder="Selecione a etapa"
-              options={STATUS.filter((s) => s.value !== statusOriginal).map((s) => ({ value: s.value, label: s.label }))}
+              options={STATUS.filter(
+                (s) =>
+                  s.value !== statusOriginal &&
+                  !(s.value === "proposta_enviada" && !ehGestor && !atendimento?.aprovado_por && !atendimento?.importado),
+              ).map((s) => ({ value: s.value, label: s.label }))}
               error={erroAlvo}
             />
           )}

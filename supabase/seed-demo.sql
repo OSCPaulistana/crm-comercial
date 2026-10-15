@@ -30,7 +30,7 @@ declare
   v_vend uuid;
   v_prod uuid;
   v_canal text;
-  statuses text[] := array['primeiro_contato','qualificacao','agendado_visita','visita_realizada',
+  statuses text[] := array['qualificacao','elaboracao_proposta','agendado_visita','visita_realizada',
                            'proposta_enviada','negocio_efetivado','negocio_declinado'];
 begin
   for i in 1..120 loop

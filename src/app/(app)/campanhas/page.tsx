@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { requirePerfil } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { fetchAll } from "@/lib/supabase/fetch-all";
-import { GESTORES } from "@/lib/constants";
+import { ETAPA_AGENDADO, ETAPA_FECHADO, GESTORES } from "@/lib/constants";
 import type { Campanha, TipoCampanha } from "@/types/database";
 import { CampanhasView, type ProgressoCampanha } from "./CampanhasView";
 
@@ -24,8 +24,8 @@ export default async function CampanhasPage() {
   for (const v of vinculos) {
     const p = (progresso[v.campanha_id] ??= { contatos: 0, agendados: 0, fechados: 0 });
     p.contatos += 1;
-    if (v.etapa_maxima >= 3) p.agendados += 1;
-    if (v.etapa_maxima >= 6) p.fechados += 1;
+    if (v.etapa_maxima >= ETAPA_AGENDADO) p.agendados += 1;
+    if (v.etapa_maxima >= ETAPA_FECHADO) p.fechados += 1;
   }
 
   return (

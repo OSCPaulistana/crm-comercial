@@ -67,6 +67,13 @@ export interface Meta {
   meta_faturamento: number;
 }
 
+/** Item da proposta: valor de um serviço, com a recorrência que ele tinha no catálogo ao ser orçado. */
+export interface PropostaItem {
+  produto_id: string;
+  valor: number;
+  recorrencia: Recorrencia;
+}
+
 export interface Atendimento {
   id: string;
   data: string;
@@ -79,6 +86,8 @@ export interface Atendimento {
   indicado_por: string | null;
   cnpj: string | null;
   contato_nome: string | null;
+  /** Responsável (sócio/administrador) da empresa — sugerido a partir do QSA da Receita Federal. */
+  responsavel_empresa: string | null;
   /** Registro trazido do CRM anterior (etiqueta "Importado"). */
   importado: boolean;
   importacao_lote: string | null;
@@ -103,9 +112,23 @@ export interface Atendimento {
   qualif_contabilidade_anterior: string | null;
   qualif_principal_dor: string | null;
   qualif_produtos: string[];
+  qualif_linkedin: string | null;
+  qualif_instagram: string | null;
+  qualif_facebook: string | null;
+  /** Restaurante: pede o sistema da frente de caixa e o ERP financeiro. */
+  qualif_restaurante: boolean | null;
+  qualif_pdv_sistema: string | null;
+  qualif_erp_financeiro: string | null;
   /** Serviços/pacotes da proposta (pode haver mais de um). */
   proposta_produtos: string[];
+  /** Valor de cada serviço da proposta (com a recorrência de cada um). */
+  proposta_itens: PropostaItem[];
+  /** Total da proposta (soma dos itens). */
   proposta_valor: number | null;
+  /** Aprovação da proposta pela Diretoria/gestor (preenchida ao liberar o envio ao cliente). */
+  aprovado_por: string | null;
+  data_aprovacao: string | null;
+  /** Data do envio da proposta ao cliente. */
   data_proposta: string | null;
   conforme_proposta: boolean | null;
   /** Serviços/pacotes fechados (pode haver mais de um). */

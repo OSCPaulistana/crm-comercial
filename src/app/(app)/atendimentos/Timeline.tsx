@@ -18,7 +18,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { MEIOS_CONTATO, STATUS, STATUS_MAP, type MeioContato, type StatusAtendimento, type Tone } from "@/lib/constants";
+import { ETAPA_FECHADO, MEIOS_CONTATO, STATUS, STATUS_MAP, type MeioContato, type StatusAtendimento, type Tone } from "@/lib/constants";
 import { formatDate, formatDateTime } from "@/lib/format";
 import {
   ACCEPT_ANEXOS,
@@ -69,17 +69,46 @@ export function EtapasStepper({
   onSelecionar: (s: StatusAtendimento) => void;
 }) {
   const declinado = status === "negocio_declinado";
+  const ganho = status === "negocio_efetivado";
   const etapaAtual = STATUS_MAP[status].etapa;
   // primeira vez em que cada etapa foi alcançada
   const dataDe = new Map<string, string>();
   for (const h of [...historico].reverse()) if (!dataDe.has(h.status_novo)) dataDe.set(h.status_novo, h.created_at);
+  // o antigo "Primeiro contato" foi incorporado à Qualificação
+  if (!dataDe.has("qualificacao") && dataDe.has("primeiro_contato")) dataDe.set("qualificacao", dataDe.get("primeiro_contato")!);
 
   return (
     <div className="-mx-1 overflow-x-auto px-1 pb-1">
-      <ol className="flex min-w-[600px] items-start" aria-label="Etapas do atendimento">
+      <ol className="flex min-w-[720px] items-start" aria-label="Etapas do atendimento">
         {ETAPAS_FUNIL.map((s, i) => {
-          const concluida = declinado ? s.etapa <= etapaMaxima : s.etapa < etapaAtual;
-          const atual = !declinado && s.etapa === etapaAtual;
+          // a 7ª etapa (fechamento) mostra o declínio quando o negócio foi declinado
+          if (declinado && s.etapa === ETAPA_FECHADO) {
+            return (
+              <li key="declinado" className="relative flex flex-1 flex-col items-center text-center">
+                <span className="absolute top-[26px] right-1/2 h-0.5 w-full -translate-y-1/2 border-t-2 border-dashed border-danger/60" aria-hidden />
+                <button
+                  type="button"
+                  onClick={() => onSelecionar("negocio_declinado")}
+                  aria-pressed={selecionada === "negocio_declinado"}
+                  title="Ver o motivo do declínio"
+                  className={`relative z-10 flex w-full cursor-pointer flex-col items-center rounded-md px-1 py-2 transition-colors hover:bg-white ${
+                    selecionada === "negocio_declinado" ? "bg-white shadow-soft ring-1 ring-danger/40" : ""
+                  }`}
+                >
+                  <span className="flex size-7 items-center justify-center rounded-full border-2 border-danger bg-danger text-white ring-4 ring-danger/15">
+                    <X className="size-3.5" strokeWidth={3} />
+                  </span>
+                  <span className="mt-1.5 text-[11px] leading-tight font-semibold text-danger">Declinado</span>
+                  {dataDe.get("negocio_declinado") && (
+                    <span className="text-[10px] text-fg-3 tabular-nums">{formatDate(dataDe.get("negocio_declinado"))}</span>
+                  )}
+                </button>
+              </li>
+            );
+          }
+          const fechado = ganho && s.etapa === ETAPA_FECHADO;
+          const concluida = declinado ? s.etapa <= etapaMaxima : s.etapa < etapaAtual || fechado;
+          const atual = !declinado && !fechado && s.etapa === etapaAtual;
           const alcancada = concluida || atual;
           const data = dataDe.get(s.value);
           const sel = selecionada === s.value;
@@ -114,35 +143,14 @@ export function EtapasStepper({
                   {concluida ? <Check className="size-3.5" strokeWidth={3} /> : i + 1}
                 </span>
                 <span className={`mt-1.5 px-1 text-[11px] leading-tight ${atual ? "font-semibold text-fg" : concluida ? "text-fg" : "text-fg-3"}`}>
-                  {s.label}
+                  {s.etapa === ETAPA_FECHADO ? (fechado ? "Negócio efetivado" : "Fechamento do negócio") : s.label}
                 </span>
+                {s.etapa === ETAPA_FECHADO && !fechado && <span className="text-[10px] leading-tight text-fg-3">(fechamento ou declínio)</span>}
                 {data && alcancada && <span className="text-[10px] text-fg-3 tabular-nums">{formatDate(data)}</span>}
               </button>
             </li>
           );
         })}
-        {declinado && (
-          <li className="relative flex flex-1 flex-col items-center text-center">
-            <span className="absolute top-[26px] right-1/2 h-0.5 w-full -translate-y-1/2 border-t-2 border-dashed border-danger/60" aria-hidden />
-            <button
-              type="button"
-              onClick={() => onSelecionar("negocio_declinado")}
-              aria-pressed={selecionada === "negocio_declinado"}
-              title="Ver o motivo do declínio"
-              className={`relative z-10 flex w-full cursor-pointer flex-col items-center rounded-md px-1 py-2 transition-colors hover:bg-white ${
-                selecionada === "negocio_declinado" ? "bg-white shadow-soft ring-1 ring-danger/40" : ""
-              }`}
-            >
-              <span className="flex size-7 items-center justify-center rounded-full border-2 border-danger bg-danger text-white ring-4 ring-danger/15">
-                <X className="size-3.5" strokeWidth={3} />
-              </span>
-              <span className="mt-1.5 text-[11px] leading-tight font-semibold text-danger">Declinado</span>
-              {dataDe.get("negocio_declinado") && (
-                <span className="text-[10px] text-fg-3 tabular-nums">{formatDate(dataDe.get("negocio_declinado"))}</span>
-              )}
-            </button>
-          </li>
-        )}
       </ol>
     </div>
   );
