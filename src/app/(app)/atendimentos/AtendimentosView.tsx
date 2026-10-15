@@ -48,22 +48,16 @@ export function AtendimentosView({ atendimentos, vendedores, campanhas, produtos
         value: (r) => r.data,
         filterValue: (r) => formatDate(r.data),
         render: (r) => <span className="tabular-nums">{formatDate(r.data)}</span>,
-        className: "w-[120px]",
+        className: "whitespace-nowrap",
       },
       {
         key: "lead",
         header: "Lead",
+        className: "min-w-[130px]",
         value: (r) => r.lead,
         render: (r) => (
-          <span className="flex max-w-[300px] items-center gap-2">
-            <span className="truncate font-medium" title={r.lead}>
-              {r.lead}
-            </span>
-            {r.importado && (
-              <Badge tone="neutral" dot={false} className="shrink-0">
-                Importado
-              </Badge>
-            )}
+          <span className="line-clamp-2 font-medium break-words" title={r.lead}>
+            {r.lead}
           </span>
         ),
       },
@@ -71,7 +65,7 @@ export function AtendimentosView({ atendimentos, vendedores, campanhas, produtos
         key: "cnpj",
         header: "CNPJ",
         value: (r) => r.cnpj ?? "",
-        render: (r) => (r.cnpj ? <span className="tabular-nums">{r.cnpj}</span> : <span className="text-fg-3">—</span>),
+        render: (r) => (r.cnpj ? <span className="text-[12px] whitespace-nowrap tabular-nums">{r.cnpj}</span> : <span className="text-fg-3">—</span>),
       },
       {
         key: "porte",
@@ -98,9 +92,9 @@ export function AtendimentosView({ atendimentos, vendedores, campanhas, produtos
         filterOptions: opts(CANAIS),
         render: (r) =>
           r.indicado_por ? (
-            <span className="block max-w-[180px]">
+            <span className="block break-words">
               {r.canal}
-              <span className="block truncate text-xs text-fg-2" title={`Indicado por ${r.indicado_por}`}>
+              <span className="block text-xs break-words text-fg-2" title={`Indicado por ${r.indicado_por}`}>
                 por {r.indicado_por}
               </span>
             </span>
@@ -121,7 +115,7 @@ export function AtendimentosView({ atendimentos, vendedores, campanhas, produtos
         filterValue: (r) => STATUS_MAP[r.status]?.label ?? r.status,
         filter: "select",
         filterOptions: STATUS.map((s) => ({ value: s.value, label: s.label })),
-        render: (r) => <StatusBadge status={r.status} />,
+        render: (r) => <StatusBadge status={r.status} wrap />,
       },
       {
         key: "responsavel",
@@ -161,6 +155,9 @@ export function AtendimentosView({ atendimentos, vendedores, campanhas, produtos
         columns={columns}
         rowKey={(r) => r.id}
         onRowClick={setEditando}
+        responsive
+        cardTitleKey="lead"
+        pageSize={20}
         initialSort={{ key: "data", dir: "desc" }}
         emptyTitle="Nenhum atendimento registrado"
         emptyDescription="Registre o primeiro atendimento para começar a alimentar o funil."
