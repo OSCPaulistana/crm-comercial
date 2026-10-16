@@ -26,3 +26,37 @@ export const mesDe = (iso: string) => Number(iso.slice(5, 7));
 
 /** Percentual atingido (null quando não há meta). */
 export const pctDe = (real: number, meta: number) => (meta > 0 ? real / meta : null);
+
+/* ------------------------------------------------------------------ */
+/* Forecast                                                            */
+/* ------------------------------------------------------------------ */
+export type EstadoAno = "encerrado" | "em_andamento" | "futuro";
+
+const diasNoMes = (ano: number, mes: number) => new Date(ano, mes, 0).getDate();
+
+/**
+ * Em que ponto do ano estamos. `mesesDecorridos` conta os meses inteiros já passados mais a fração do mês corrente
+ * (dia / dias do mês), ex.: 16/10 = 9 + 16/31 = 9,52 meses.
+ */
+export function andamentoDoAno(ano: number, hojeISO: string): { estado: EstadoAno; mesAtual: number; mesesDecorridos: number } {
+  const anoAtual = Number(hojeISO.slice(0, 4));
+  if (ano < anoAtual) return { estado: "encerrado", mesAtual: 12, mesesDecorridos: 12 };
+  if (ano > anoAtual) return { estado: "futuro", mesAtual: 0, mesesDecorridos: 0 };
+  const mes = Number(hojeISO.slice(5, 7));
+  const dia = Number(hojeISO.slice(8, 10));
+  return { estado: "em_andamento", mesAtual: mes, mesesDecorridos: mes - 1 + dia / diasNoMes(ano, mes) };
+}
+
+/** Base mínima (em meses) para calcular o ritmo: evita projeções absurdas nos primeiros dias do ano. */
+export const BASE_MINIMA_MESES = 1;
+
+/**
+ * Projeção de fechamento do ano pelo ritmo atual: realizado + ritmo mensal x meses restantes,
+ * com ritmo = realizado / meses decorridos (no mínimo 1 mês). Ano encerrado: o próprio realizado.
+ */
+export function projetar(realizado: number, mesesDecorridos: number, estado: EstadoAno): { ritmo: number; projecao: number | null } {
+  if (estado === "encerrado") return { ritmo: realizado / 12, projecao: realizado };
+  if (estado === "futuro") return { ritmo: 0, projecao: null };
+  const ritmo = realizado / Math.max(mesesDecorridos, BASE_MINIMA_MESES);
+  return { ritmo, projecao: realizado + ritmo * (12 - mesesDecorridos) };
+}

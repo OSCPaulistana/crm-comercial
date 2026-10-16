@@ -39,7 +39,7 @@ begin
     v_status := statuses[1 + floor(random() * 7)::int];
     select id into v_vend from public.vendedores where email like '%@exemplo.com' order by random() limit 1;
     select id into v_prod from public.produtos order by random() limit 1;
-    v_canal := (array['Indicação','Captação Ativa','Captação Receptiva','Redes Sociais','Outros'])[1 + floor(random() * 5)::int];
+    v_canal := (array['Indicação','Captação Ativa','Orgânico','Redes Sociais','Outros'])[1 + floor(random() * 5)::int];
 
     insert into public.atendimentos (
       data, lead, porte, regime, canal, meio_contato_inicial, indicado_por, uf, municipio, status, responsavel_id,

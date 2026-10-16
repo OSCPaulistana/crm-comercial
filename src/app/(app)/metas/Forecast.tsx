@@ -7,7 +7,7 @@ import { KpiCard } from "@/components/ui/KpiCard";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { CHART_PRIMARY, CHART_REFERENCE, MESES, MESES_LONGOS } from "@/lib/constants";
 import { formatBRL, formatBRLCompact, formatNumber, formatPercent, todayISO } from "@/lib/format";
-import { mesDe, pctDe, type Venda } from "@/lib/metas-calc";
+import { andamentoDoAno, mesDe, pctDe, projetar, type Venda } from "@/lib/metas-calc";
 import type { Meta, Vendedor } from "@/types/database";
 import { Barra } from "./Acompanhamento";
 
@@ -22,31 +22,12 @@ interface Props {
   vendas: Venda[];
 }
 
-const bissexto = (a: number) => (a % 4 === 0 && a % 100 !== 0) || a % 400 === 0;
-const diasNoMes = (a: number, m: number) => new Date(a, m, 0).getDate();
-
-/** Quanto do ano já passou (0 a 1) e em que mês/dia estamos. */
-function andamentoDoAno(ano: number) {
-  const hoje = todayISO();
-  const anoAtual = Number(hoje.slice(0, 4));
-  if (ano < anoAtual) return { fracao: 1, mesAtual: 12, mesesDecorridos: 12, estado: "encerrado" as const };
-  if (ano > anoAtual) return { fracao: 0, mesAtual: 0, mesesDecorridos: 0, estado: "futuro" as const };
-  const mes = Number(hoje.slice(5, 7));
-  const dia = Number(hoje.slice(8, 10));
-  const inicioAno = Date.UTC(ano, 0, 1);
-  const diaDoAno = Math.round((Date.UTC(ano, mes - 1, dia) - inicioAno) / 86400000) + 1;
-  const fracao = diaDoAno / (bissexto(ano) ? 366 : 365);
-  // meses decorridos (com fração do mês atual)
-  const mesesDecorridos = mes - 1 + dia / diasNoMes(ano, mes);
-  return { fracao, mesAtual: mes, mesesDecorridos, estado: "em_andamento" as const };
-}
-
 /** Forecast do ano: meta x realizado até hoje, projeção de fechamento e ajuste necessário para bater a meta. */
 export function Forecast({ ano, metas, vendedores, vendas }: Props) {
   const [vendedoresSel, setVendedoresSel] = useState<string[]>([]);
 
   const f = useMemo(() => {
-    const { mesAtual, mesesDecorridos, estado } = andamentoDoAno(ano);
+    const { mesAtual, mesesDecorridos, estado } = andamentoDoAno(ano, todayISO());
     const doVendedor = (id: string | null) => !vendedoresSel.length || (id !== null && vendedoresSel.includes(id));
 
     const metaMes = Array<number>(12).fill(0);
@@ -76,14 +57,13 @@ export function Forecast({ ano, metas, vendedores, vendas }: Props) {
       metaAteHoje += metaMes[mesAtual - 1] * (mesesDecorridos - (mesAtual - 1));
     }
 
-    const ritmo = mesesDecorridos > 0 ? realizado / mesesDecorridos : 0; // por mês
-    const ritmoCli = mesesDecorridos > 0 ? clientes / mesesDecorridos : 0;
     const restantes = 12 - mesesDecorridos;
-    const projecao = estado === "encerrado" ? realizado : estado === "futuro" ? null : realizado + ritmo * restantes;
-    const projecaoClientes = estado === "encerrado" ? clientes : estado === "futuro" ? null : clientes + ritmoCli * restantes;
+    const { ritmo, projecao } = projetar(realizado, mesesDecorridos, estado);
+    const { projecao: projecaoClientes } = projetar(clientes, mesesDecorridos, estado);
     const falta = Math.max(0, metaAno - realizado);
     const ajuste = projecao === null ? null : Math.max(0, metaAno - projecao);
-    const necessarioPorMes = restantes > 0 ? falta / restantes : null;
+    // valor mensal só faz sentido com pelo menos meio mês pela frente (no fim do ano a divisão explodiria)
+    const necessarioPorMes = restantes >= 0.5 ? falta / restantes : null;
 
     // séries mensais (e acumuladas) para o gráfico
     let acMeta = 0;
@@ -109,17 +89,22 @@ export function Forecast({ ano, metas, vendedores, vendas }: Props) {
   }, [ano, metas, vendas, vendedoresSel]);
 
   const porVendedor = useMemo(() => {
-    const { mesesDecorridos, estado } = andamentoDoAno(ano);
-    return vendedores
-      .map((v) => {
-        const metaAno = metas.filter((m) => m.vendedor_id === v.id).reduce((s, m) => s + Number(m.meta_faturamento), 0);
-        const metaCli = metas.filter((m) => m.vendedor_id === v.id).reduce((s, m) => s + m.meta_clientes, 0);
-        const doV = vendas.filter((x) => x.responsavel_id === v.id);
-        const realizado = doV.reduce((s, x) => s + Number(x.valor_fechado ?? 0), 0);
-        const projecao = estado === "encerrado" ? realizado : estado === "futuro" ? null : mesesDecorridos > 0 ? (realizado / mesesDecorridos) * 12 : null;
-        return { v, metaAno, metaCli, realizado, clientes: doV.length, projecao, ajuste: projecao === null ? null : Math.max(0, metaAno - projecao) };
-      })
-      .filter((r) => r.v.ativo || r.metaAno > 0 || r.realizado > 0);
+    const { mesesDecorridos, estado } = andamentoDoAno(ano, todayISO());
+    const linha = (id: string, nome: string, ativo: boolean, doV: Venda[], metasDoV: Meta[]) => {
+      const metaAno = metasDoV.reduce((t, m) => t + Number(m.meta_faturamento), 0);
+      const metaCli = metasDoV.reduce((t, m) => t + m.meta_clientes, 0);
+      const realizado = doV.reduce((t, x) => t + Number(x.valor_fechado ?? 0), 0);
+      const { projecao } = projetar(realizado, mesesDecorridos, estado);
+      return { id, nome, ativo, metaAno, metaCli, realizado, clientes: doV.length, projecao, ajuste: projecao === null ? null : Math.max(0, metaAno - projecao) };
+    };
+    const conhecidos = new Set(vendedores.map((v) => v.id));
+    const linhas = vendedores.map((v) =>
+      linha(v.id, v.nome, v.ativo, vendas.filter((x) => x.responsavel_id === v.id), metas.filter((m) => m.vendedor_id === v.id)),
+    );
+    // vendas sem responsável (ou de vendedor removido): sem elas, o total da tabela não bateria com os KPIs
+    const orfas = vendas.filter((x) => !x.responsavel_id || !conhecidos.has(x.responsavel_id));
+    if (orfas.length) linhas.push(linha("__sem__", "Sem responsável", true, orfas, []));
+    return linhas.filter((r) => r.ativo || r.metaAno > 0 || r.realizado > 0);
   }, [ano, metas, vendedores, vendas]);
 
   const pctRealizado = pctDe(f.realizado, f.metaAno);
@@ -142,7 +127,7 @@ export function Forecast({ ano, metas, vendedores, vendas }: Props) {
           />
         </div>
         <p className="pb-2 text-sm text-fg-2">
-          {f.estado === "em_andamento" && `Ano de ${ano} em andamento. A projeção mantém o ritmo médio de fechamentos até hoje.`}
+          {f.estado === "em_andamento" && `Ano de ${ano} em andamento. A projeção mantém o ritmo médio de fechamentos do ano até hoje.`}
           {f.estado === "encerrado" && `Ano de ${ano} encerrado: a projeção é o próprio realizado.`}
           {f.estado === "futuro" && `O ano de ${ano} ainda não começou: não há realizado nem projeção.`}
         </p>
@@ -189,11 +174,13 @@ export function Forecast({ ano, metas, vendedores, vendas }: Props) {
           value={formatBRL(f.falta)}
           icon={<Wallet className="size-4" />}
           context={
-            f.necessarioPorMes === null
+            f.estado === "encerrado"
               ? "Ano encerrado"
               : f.falta === 0
                 ? "Meta do ano já atingida"
-                : `${formatBRL(f.necessarioPorMes)} por mês nos ${f.restantes.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} meses restantes`
+                : f.necessarioPorMes === null
+                  ? "No que resta do ano"
+                  : `${formatBRL(f.necessarioPorMes)} por mês nos ${f.restantes.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} meses restantes`
           }
         />
         <KpiCard
@@ -209,7 +196,7 @@ export function Forecast({ ano, metas, vendedores, vendas }: Props) {
                 : f.ajuste === 0
                   ? `Projeção ${formatBRL((f.projecao ?? 0) - f.metaAno)} acima da meta`
                   : `A mais além do ritmo atual${
-                      f.restantes > 0 ? ` (${formatBRL(f.ajuste / f.restantes)} a mais por mês)` : ""
+                      f.restantes >= 0.5 ? ` (${formatBRL(f.ajuste / f.restantes)} a mais por mês)` : ""
                     }`
           }
         />
@@ -321,8 +308,8 @@ export function Forecast({ ano, metas, vendedores, vendas }: Props) {
               {porVendedor.map((r) => {
                 const pct = pctDe(r.realizado, r.metaAno);
                 return (
-                  <tr key={r.v.id} className="border-t border-line">
-                    <td className="px-4 py-2.5 font-medium text-fg">{r.v.nome}</td>
+                  <tr key={r.id} className="border-t border-line">
+                    <td className="px-4 py-2.5 font-medium text-fg">{r.nome}</td>
                     <td className="px-3 py-2.5 text-right tabular-nums">{formatBRL(r.metaAno)}</td>
                     <td className="px-3 py-2.5 text-right tabular-nums">{formatBRL(r.realizado)}</td>
                     <td className="px-3 py-2.5">
@@ -355,8 +342,8 @@ export function Forecast({ ano, metas, vendedores, vendas }: Props) {
           </table>
         </div>
         <p className="border-t border-line px-4 py-2.5 text-xs text-fg-3">
-          Projeção = realizado até hoje + ritmo médio mensal x meses restantes. Ajuste necessário = quanto falta, além da projeção, para atingir a
-          meta do ano.
+          Projeção = realizado até hoje + ritmo médio mensal x meses restantes. O ritmo é o realizado dividido pelos meses decorridos (mínimo de 1
+          mês, para não distorcer nos primeiros dias do ano). Ajuste necessário = quanto falta, além da projeção, para atingir a meta do ano.
         </p>
       </section>
     </div>

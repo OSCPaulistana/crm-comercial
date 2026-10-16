@@ -129,7 +129,7 @@ export function RatingComercial({ linhas, equipe }: { linhas: LinhaRating[]; equ
         </div>
       )}
       <p className="mt-2 text-xs text-fg-3">
-        Considera as vendas fechadas no período e nos filtros selecionados. Orgânico = Captação Receptiva. Vendas de origem &quot;Outros&quot; ainda não
+        Considera as vendas fechadas no período e nos filtros selecionados. Vendas de origem &quot;Outros&quot; ainda não
         pontuam (serão classificadas) e ficam fora da média.
       </p>
     </div>

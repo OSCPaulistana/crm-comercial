@@ -19,7 +19,7 @@ export const ADMIN: Perfil[] = ["administrador"];
 export const PORTES = ["MEI", "ME", "EPP", "DEMAIS"] as const;
 export const REGIMES = ["MEI", "Simples Nacional", "Lucro Presumido", "Lucro Real"] as const;
 /** Origem do lead (canal de prospecção). "Outros" fica por enquanto: será corrigido depois. */
-export const CANAIS = ["Captação Ativa", "Captação Receptiva", "Redes Sociais", "Indicação", "Outros"] as const;
+export const CANAIS = ["Captação Ativa", "Orgânico", "Redes Sociais", "Indicação", "Outros"] as const;
 /** Valor usado nos leads importados que não trazem porte/regime. Não é uma opção de escolha na tela. */
 export const NAO_INFORMADO = "Não informado" as const;
 
@@ -126,7 +126,7 @@ export const UFS = [
 export const SERIES_COLORS = ["#2a78d6", "#eb6834", "#4a3aa7", "#1baf7a"];
 export const CANAL_COLOR: Record<Canal, string> = {
   "Captação Ativa": SERIES_COLORS[0],
-  "Captação Receptiva": SERIES_COLORS[3],
+  "Orgânico": SERIES_COLORS[3],
   "Redes Sociais": SERIES_COLORS[2],
   "Indicação": SERIES_COLORS[1],
   // "Outros" segue a convenção de cinza neutro para a categoria residual
@@ -134,15 +134,14 @@ export const CANAL_COLOR: Record<Canal, string> = {
 };
 
 /**
- * Origens analíticas (funis) e pontuação de venda. Orgânico = lead que chegou sozinho (Captação Receptiva).
+ * Origens analíticas (funis) e pontuação de venda. Orgânico = lead que chegou sozinho.
  * "Outros" não pertence a nenhuma origem por enquanto (será classificado depois): não entra nos funis nem pontua.
- * Captação Receptiva e, por enquanto, Outros.
  */
 export const ORIGENS = [
   { key: "redes_sociais", label: "Redes Sociais", pontos: 6, canais: ["Redes Sociais"] },
   { key: "captacao_ativa", label: "Captação Ativa", pontos: 10, canais: ["Captação Ativa"] },
   { key: "indicacao", label: "Indicação", pontos: 4, canais: ["Indicação"] },
-  { key: "organico", label: "Orgânico", pontos: 3, canais: ["Captação Receptiva"] },
+  { key: "organico", label: "Orgânico", pontos: 3, canais: ["Orgânico"] },
 ] as const satisfies readonly { key: string; label: string; pontos: number; canais: readonly Canal[] }[];
 
 export type OrigemKey = (typeof ORIGENS)[number]["key"];
