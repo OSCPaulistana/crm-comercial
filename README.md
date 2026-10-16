@@ -36,10 +36,14 @@ As permissões são aplicadas em **duas camadas**: no servidor (cada página val
 - **Mapa de negócios fechados**: no dashboard, mapa do Brasil (contornos de `public/geo/brasil-uf.json`, do IBGE) com um ponto e a quantidade em cada cidade com negócio fechado no período. Roda do mouse dá zoom (os nomes das cidades aparecem ao aproximar) e arrastar move. Ao lado, ranking das 5 cidades com mais negócios fechados. Respeitam os filtros do dashboard.
 - **Negócios efetivados por indicação**: relação detalhada no fim do dashboard, com filtro de quem indicou e exportação em CSV.
 - **Município do lead**: UF + município (IBGE) são obrigatórios no atendimento e alimentam o filtro do dashboard.
-- **Gráfico "tipo de 1º contato"**: usa o **Canal de prospecção** do atendimento (Indicação, Captação, Redes Sociais, Alex).
+- **Origem do lead (canal de prospecção)**: Captação Ativa, Captação Receptiva, Redes Sociais, Indicação e Outros ("Outros" fica por enquanto, será corrigido). Os antigos "Captação" viraram Captação Ativa.
+- **Funis do dashboard**: o **Funil de vendas** é o geral; abaixo dele ficam 4 funis analíticos, só com os atendimentos de cada origem: Redes Sociais, Captação Ativa, Indicação e Orgânico (Orgânico = Captação Receptiva + Outros).
+- **Evolução da taxa de conversão**: por mês de registro, % dos atendimentos que viraram clientes (todas as origens).
+- **Pontuação de vendas e rating comercial**: cada venda fechada vale pontos conforme a origem: **Captação Ativa 10, Redes Sociais 6, Indicação 4, Orgânico 3**. O rating de cada vendedor é a **média de pontos por venda**: **A** 8,00 a 10,00 · **B** 6,50 a 7,99 · **C** 5,00 a 6,49 · **D** 4,00 a 4,99 · **F** 3,00 a 3,99. Calculado sobre as vendas do período e dos filtros do dashboard.
+- **Ranking de cidades**: todas as cidades com negócio fechado no período (a lista rola), ao lado do mapa.
 - **Filtros do dashboard**: período *entre* datas (dd/mm/aaaa, com atalhos), vendedores e municípios (múltipla escolha). As metas respeitam o período e os vendedores selecionados. Metas não têm município, então esse filtro não as altera.
 - **Campanhas**: UF e município vêm da API pública do IBGE. Os atendimentos podem ser vinculados a uma campanha, e a listagem mostra o realizado × meta.
-- **Metas**: mensais, por vendedor (clientes captados e faturamento). Cada mês pode ser **detalhado por produto**; nesse caso, o total do mês passa a ser a soma dos produtos. O dashboard soma as metas do período e dos vendedores filtrados.
+- **Metas** (3 abas): **Cadastro de metas** (mensais, por vendedor — clientes captados e faturamento; cada mês pode ser **detalhado por produto**, e então o total do mês é a soma dos produtos); **Acompanhamento** (KPIs com a meta do período de cada produto/serviço e, na relação de vendedores, o clique abre a meta x realizado por produto/serviço); **Forecast** (meta x realizado do ano, projeção de fechamento no ritmo atual e quanto falta ajustar para atingir a meta). O dashboard soma as metas do período e dos vendedores filtrados.
 
 ## Rodando localmente
 
@@ -63,7 +67,8 @@ No Supabase, abra **SQL Editor** e execute, nesta ordem:
 11. `supabase/migrations/20261014000011_importacao_crm_anterior.sql`
 12. `supabase/migrations/20261014000012_leitura_claude.sql` (role e views somente leitura, opcional; ver seção MCP)
 13. `supabase/migrations/20261015000013_novo_funil_qsa_proposta_itens.sql` (novo funil de 7 etapas, aprovação, itens da proposta, responsável da empresa, redes sociais e restaurante)
-14. *(opcional)* `supabase/seed-demo.sql` — cria produtos, 2 vendedores, metas e 120 atendimentos fictícios para você validar o dashboard. No fim do arquivo há o SQL para removê-los.
+14. `supabase/migrations/20261016000014_origens_de_lead.sql` (nova lista de origens de lead)
+15. *(opcional)* `supabase/seed-demo.sql` — cria produtos, 2 vendedores, metas e 120 atendimentos fictícios para você validar o dashboard. No fim do arquivo há o SQL para removê-los.
 
 > Com a Supabase CLI, você também pode usar `supabase link` + `supabase db push`.
 

@@ -7,8 +7,11 @@ import { PageHeader, EmptyState } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { KpiCard } from "@/components/ui/KpiCard";
 import { MESES } from "@/lib/constants";
+import type { Venda } from "@/lib/metas-calc";
 import { formatBRL, formatBRLCompact, formatNumber } from "@/lib/format";
 import type { Meta, MetaProduto, Produto, Profile, Vendedor } from "@/types/database";
+import { Acompanhamento } from "./Acompanhamento";
+import { Forecast } from "./Forecast";
 import { MetaForm } from "./MetaForm";
 import { VendedoresModal } from "./VendedoresModal";
 
@@ -19,9 +22,19 @@ interface Props {
   vendedores: Vendedor[];
   profiles: Profile[];
   produtos: Produto[];
+  /** Negócios fechados no ano (realizado das metas). */
+  vendas: Venda[];
 }
 
-export function MetasView({ ano, metas, metasProdutos, vendedores, profiles, produtos }: Props) {
+type Aba = "cadastro" | "acompanhamento" | "forecast";
+const ABAS: { id: Aba; label: string }[] = [
+  { id: "cadastro", label: "Cadastro de metas" },
+  { id: "acompanhamento", label: "Acompanhamento" },
+  { id: "forecast", label: "Forecast" },
+];
+
+export function MetasView({ ano, metas, metasProdutos, vendedores, profiles, produtos, vendas }: Props) {
+  const [aba, setAba] = useState<Aba>("cadastro");
   const comProduto = useMemo(() => new Set(metasProdutos.map((mp) => mp.meta_id)), [metasProdutos]);
   const router = useRouter();
   const [vendedoresOpen, setVendedoresOpen] = useState(false);
@@ -53,7 +66,7 @@ export function MetasView({ ano, metas, metasProdutos, vendedores, profiles, pro
     <>
       <PageHeader
         title="Metas comerciais"
-        description="Metas mensais de captação de clientes e faturamento por vendedor, com detalhamento opcional por produto."
+        description="Cadastro das metas mensais por vendedor, acompanhamento do realizado por produto/serviço e forecast do ano."
         actions={
           <>
             <select
@@ -68,20 +81,57 @@ export function MetasView({ ano, metas, metasProdutos, vendedores, profiles, pro
                 </option>
               ))}
             </select>
-            <Button variant="secondary" icon={<Users className="size-4" />} onClick={() => setVendedoresOpen(true)}>
-              Cadastro de vendedores
-            </Button>
-            <Button
-              icon={<Plus className="size-4" />}
-              onClick={() => setMetaForm({ vendedorId: "" })}
-              disabled={vendedores.filter((v) => v.ativo).length === 0}
-            >
-              Definir metas
-            </Button>
+            {aba === "cadastro" && (
+              <>
+                <Button variant="secondary" icon={<Users className="size-4" />} onClick={() => setVendedoresOpen(true)}>
+                  Cadastro de vendedores
+                </Button>
+                <Button
+                  icon={<Plus className="size-4" />}
+                  onClick={() => setMetaForm({ vendedorId: "" })}
+                  disabled={vendedores.filter((v) => v.ativo).length === 0}
+                >
+                  Definir metas
+                </Button>
+              </>
+            )}
           </>
         }
       />
 
+      <div role="tablist" aria-label="Seções de metas" className="mb-6 flex gap-1 overflow-x-auto overflow-y-hidden border-b border-line">
+        {ABAS.map((a) => (
+          <button
+            key={a.id}
+            type="button"
+            role="tab"
+            id={`aba-${a.id}`}
+            aria-selected={aba === a.id}
+            aria-controls={`painel-${a.id}`}
+            onClick={() => setAba(a.id)}
+            className={`-mb-px shrink-0 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+              aba === a.id ? "border-accent text-accent" : "border-transparent text-fg-2 hover:text-fg"
+            }`}
+          >
+            {a.label}
+          </button>
+        ))}
+      </div>
+
+      {aba === "acompanhamento" && (
+        <div role="tabpanel" id="painel-acompanhamento" aria-labelledby="aba-acompanhamento" key={`ac-${ano}`}>
+          <Acompanhamento ano={ano} metas={metas} metasProdutos={metasProdutos} vendedores={vendedores} produtos={produtos} vendas={vendas} />
+        </div>
+      )}
+
+      {aba === "forecast" && (
+        <div role="tabpanel" id="painel-forecast" aria-labelledby="aba-forecast" key={`fc-${ano}`}>
+          <Forecast ano={ano} metas={metas} vendedores={vendedores} vendas={vendas} />
+        </div>
+      )}
+
+      {aba === "cadastro" && (
+      <div role="tabpanel" id="painel-cadastro" aria-labelledby="aba-cadastro">
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
         <KpiCard
           label={`Meta de clientes ${ano}`}
@@ -189,6 +239,8 @@ export function MetasView({ ano, metas, metasProdutos, vendedores, profiles, pro
           </div>
         )}
       </div>
+      </div>
+      )}
 
       {metaForm && (
         <MetaForm

@@ -18,7 +18,8 @@ export const ADMIN: Perfil[] = ["administrador"];
 
 export const PORTES = ["MEI", "ME", "EPP", "DEMAIS"] as const;
 export const REGIMES = ["MEI", "Simples Nacional", "Lucro Presumido", "Lucro Real"] as const;
-export const CANAIS = ["Indicação", "Captação", "Redes Sociais", "Alex", "Outros"] as const;
+/** Origem do lead (canal de prospecção). "Outros" fica por enquanto: será corrigido depois. */
+export const CANAIS = ["Captação Ativa", "Captação Receptiva", "Redes Sociais", "Indicação", "Outros"] as const;
 /** Valor usado nos leads importados que não trazem porte/regime. Não é uma opção de escolha na tela. */
 export const NAO_INFORMADO = "Não informado" as const;
 
@@ -124,13 +125,46 @@ export const UFS = [
 /** Cores das séries categóricas (validadas para daltonismo). Ordem fixa por canal — nunca reatribuir. */
 export const SERIES_COLORS = ["#2a78d6", "#eb6834", "#4a3aa7", "#1baf7a"];
 export const CANAL_COLOR: Record<Canal, string> = {
-  "Indicação": SERIES_COLORS[0],
-  "Captação": SERIES_COLORS[1],
+  "Captação Ativa": SERIES_COLORS[0],
+  "Captação Receptiva": SERIES_COLORS[3],
   "Redes Sociais": SERIES_COLORS[2],
-  "Alex": SERIES_COLORS[3],
+  "Indicação": SERIES_COLORS[1],
   // "Outros" segue a convenção de cinza neutro para a categoria residual
   "Outros": "#9ca3af",
 };
+
+/**
+ * Origens analíticas (funis) e pontuação de venda. Orgânico = lead que chegou sozinho:
+ * Captação Receptiva e, por enquanto, Outros.
+ */
+export const ORIGENS = [
+  { key: "redes_sociais", label: "Redes Sociais", pontos: 6, canais: ["Redes Sociais"] },
+  { key: "captacao_ativa", label: "Captação Ativa", pontos: 10, canais: ["Captação Ativa"] },
+  { key: "indicacao", label: "Indicação", pontos: 4, canais: ["Indicação"] },
+  { key: "organico", label: "Orgânico", pontos: 3, canais: ["Captação Receptiva", "Outros"] },
+] as const satisfies readonly { key: string; label: string; pontos: number; canais: readonly Canal[] }[];
+
+export type OrigemKey = (typeof ORIGENS)[number]["key"];
+
+/** Origem analítica de um canal (canal desconhecido conta como Orgânico). */
+export function origemDoCanal(canal: string): (typeof ORIGENS)[number] {
+  return ORIGENS.find((o) => (o.canais as readonly string[]).includes(canal)) ?? ORIGENS[3];
+}
+
+/** Rating comercial: média de pontos por venda. */
+export const RATINGS = [
+  { letra: "A", min: 8, faixa: "8,00 a 10,00", cor: "#15803d", fundo: "#f0fdf4" },
+  { letra: "B", min: 6.5, faixa: "6,50 a 7,99", cor: "#1d4ed8", fundo: "#eff6ff" },
+  { letra: "C", min: 5, faixa: "5,00 a 6,49", cor: "#b45309", fundo: "#fffbeb" },
+  { letra: "D", min: 4, faixa: "4,00 a 4,99", cor: "#c2410c", fundo: "#fff7ed" },
+  { letra: "F", min: 0, faixa: "3,00 a 3,99", cor: "#b91c1c", fundo: "#fef2f2" },
+] as const;
+
+export function ratingDe(media: number) {
+  const m = Math.round(media * 100) / 100; // a letra segue o valor exibido (2 casas)
+  return RATINGS.find((r) => m >= r.min) ?? RATINGS[RATINGS.length - 1];
+}
+
 /**
  * Paleta categórica para produtos (ordem fixa; a cor segue o produto pela
  * ordem do catálogo, nunca pelo ranking do período).

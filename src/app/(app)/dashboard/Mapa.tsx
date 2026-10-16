@@ -301,14 +301,14 @@ export function MapaNegocios({ cidades, semLocalizacao }: { cidades: CidadeNegoc
   );
 }
 
-/** Top cidades por quantidade de negócios fechados (desempate pelo valor). */
+/** Todas as cidades com negócio fechado, por quantidade (desempate pelo valor). A lista rola quando é longa. */
 export function RankingCidades({ cidades }: { cidades: CidadeNegocio[] }) {
   if (cidades.length === 0) {
     return <div className="flex h-[200px] items-center justify-center text-sm text-fg-3">Nenhum negócio fechado no período.</div>;
   }
   const max = Math.max(...cidades.map((c) => c.qtd));
   return (
-    <ol className="space-y-4">
+    <ol className="max-h-[540px] space-y-4 overflow-y-auto pr-2">
       {cidades.map((c, i) => (
         <li key={c.key}>
           <div className="flex items-center gap-3">

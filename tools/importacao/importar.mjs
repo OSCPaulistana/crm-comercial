@@ -8,7 +8,7 @@
 //     node --env-file=.env.local tools/importacao/importar.mjs --desfazer crm-anterior-2026-09-24
 //
 // Regras acordadas com a OSC Paulistana:
-//  • Canal: Indicação/Parceiro → Indicação · Evento → Captação · Google → Redes Sociais · demais → Outros
+//  • Canal: Indicação/Parceiro → Indicação · Evento → Captação Ativa · Google → Redes Sociais · demais → Outros
 //  • Duplicados pelo CNPJ são consolidados em um único lead, trazendo todas as observações
 //  • Perdidos e retornos negativos → Declinado + Giro de Carteira (datas dos follow-ups)
 //  • Porte/Regime ausentes → "Não informado" (a tela do CRM continua exigindo o valor real ao salvar)
@@ -143,7 +143,7 @@ const LOTE = `crm-anterior-${dataExport}`;
 /* ------------------------------------------------------------------ */
 /* Regras de conversão                                                 */
 /* ------------------------------------------------------------------ */
-const CANAL = { indicacao: "Indicação", parceiro: "Indicação", evento: "Captação", google: "Redes Sociais" };
+const CANAL = { indicacao: "Indicação", parceiro: "Indicação", evento: "Captação Ativa", google: "Redes Sociais" };
 const MEIO = { whatsapp: "WhatsApp", telefone: "Ligação", presencial: "Presencial", visita: "Presencial", email: "E-mail" };
 const REGIMES_OK = new Set(["Simples Nacional", "Lucro Presumido", "Lucro Real"]);
 const ORDEM = { primeiro_contato: 0, qualificacao: 1, visita_realizada: 2, proposta_enviada: 3, negocio_efetivado: 4, negocio_declinado: 5 };

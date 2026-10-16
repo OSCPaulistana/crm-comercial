@@ -9,23 +9,26 @@ import { Button } from "@/components/ui/Button";
 import type { Coordenada } from "@/lib/geo";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { MapaNegocios, RankingCidades, type CidadeNegocio } from "./Mapa";
+import { RatingComercial, type LinhaRating } from "./Rating";
 import {
-  CANAIS,
   ETAPA_AGENDADO,
   ETAPA_FECHADO,
   ETAPA_VISITA,
   MESES,
   MEIOS_CONTATO,
   MESES_LONGOS,
+  ORIGENS,
+  origemDoCanal,
   PRODUTO_COLORS,
   type MeioContato,
+  type OrigemKey,
   STATUS_EM_ANDAMENTO,
 } from "@/lib/constants";
 import { formatBRL, formatDate, formatNumber, formatPercent, todayISO } from "@/lib/format";
 import type { Atendimento, Campanha, Meta, Produto, Vendedor } from "@/types/database";
 import {
-  AgendadosPorCanalChart,
   ContatosPorMeioChart,
+  ConversaoChart,
   FaturamentoMetaChart,
   FaturamentoProdutoPie,
   FaturamentoVendedorChart,
@@ -200,14 +203,15 @@ export function DashboardView({
 
     const base = (): MesPonto[] => buckets.map((b) => ({ label: b.label, labelLongo: b.labelLongo }));
 
-    // 1) Visitas agendadas por canal de 1º contato (mês do registro)
-    const agendados = base();
-    for (const b of agendados) for (const c of CANAIS) b[c] = 0;
+    // 1) Evolução da taxa de conversão geral: dos atendimentos registrados em cada mês, % que virou cliente
+    const conversao = base().map((pt) => ({ ...pt, atendimentos: 0, fechados: 0, taxa: null as number | null }));
     for (const a of registrados) {
-      if (a.etapa_maxima < ETAPA_AGENDADO) continue;
       const i = idx.get(mesKey(a.data));
-      if (i !== undefined) (agendados[i][a.canal] as number) += 1;
+      if (i === undefined) continue;
+      conversao[i].atendimentos += 1;
+      if (a.etapa_maxima >= ETAPA_FECHADO) conversao[i].fechados += 1;
     }
+    for (const c of conversao) c.taxa = c.atendimentos > 0 ? (c.fechados / c.atendimentos) * 100 : null;
 
     // 2) Visitas efetivadas (mês da visita)
     const visitas = base();
@@ -235,13 +239,19 @@ export function DashboardView({
       meta: metaMes[i],
     }));
 
-    // 4) Funil
-    const funil = [
-      { etapa: "Atendimentos", valor: registrados.length },
-      { etapa: "Visitas agendadas", valor: registrados.filter((a) => a.etapa_maxima >= ETAPA_AGENDADO).length },
-      { etapa: "Visitas efetivadas", valor: registrados.filter((a) => a.etapa_maxima >= ETAPA_VISITA).length },
-      { etapa: "Clientes fechados", valor: registrados.filter((a) => a.etapa_maxima >= ETAPA_FECHADO).length },
+    // 4) Funil geral e funis analíticos por origem
+    const funilDe = (lista: AtendimentoResumo[]) => [
+      { etapa: "Atendimentos", valor: lista.length },
+      { etapa: "Visitas agendadas", valor: lista.filter((a) => a.etapa_maxima >= ETAPA_AGENDADO).length },
+      { etapa: "Visitas efetivadas", valor: lista.filter((a) => a.etapa_maxima >= ETAPA_VISITA).length },
+      { etapa: "Clientes fechados", valor: lista.filter((a) => a.etapa_maxima >= ETAPA_FECHADO).length },
     ];
+    const funil = funilDe(registrados);
+    const funisOrigem = ORIGENS.map((o) => ({
+      key: o.key,
+      titulo: o.label,
+      dados: funilDe(registrados.filter((a) => origemDoCanal(a.canal).key === o.key)),
+    }));
 
     // 5) e 6) Negócios por pessoa que indicou / por campanha — por situação atual
     const agrupar = (chave: (a: AtendimentoResumo) => { k: string; nome: string } | null) => {
@@ -347,9 +357,35 @@ export function DashboardView({
       cidadesMap.set(key, cur);
     }
     const cidades = [...cidadesMap.values()].sort((a, b) => b.qtd - a.qtd || b.valor - a.valor || a.nome.localeCompare(b.nome, "pt-BR"));
-    const topCidades = cidades.slice(0, 5);
     // negócios cuja cidade não pôde ser posicionada também não aparecem no mapa
     const semPonto = semLocalizacao + cidades.filter((c) => c.lng === undefined).reduce((s, c) => s + c.qtd, 0);
+
+    // 8d) Pontuação de vendas e rating comercial: média de pontos por venda de cada vendedor
+    const vendNomeRating = new Map(vendedores.map((v) => [v.id, v.nome]));
+    const zeros = () => ({ redes_sociais: 0, captacao_ativa: 0, indicacao: 0, organico: 0 }) as Record<OrigemKey, number>;
+    const ratingMap = new Map<string, LinhaRating>();
+    const linhaRating = (id: string, nome: string) => {
+      let l = ratingMap.get(id);
+      if (!l) {
+        l = { id, nome, vendas: 0, pontos: 0, media: null, porOrigem: zeros() };
+        ratingMap.set(id, l);
+      }
+      return l;
+    };
+    for (const v of vendedores) if (vendedoresSel.length ? vendedoresSel.includes(v.id) : v.ativo) linhaRating(v.id, v.nome);
+    for (const a of efetivados) {
+      const l = linhaRating(a.responsavel_id ?? "__sem__", a.responsavel_id ? vendNomeRating.get(a.responsavel_id) ?? "—" : "Sem responsável");
+      const o = origemDoCanal(a.canal);
+      l.vendas += 1;
+      l.pontos += o.pontos;
+      l.porOrigem[o.key] += 1;
+    }
+    const linhasRating = [...ratingMap.values()]
+      .map((l) => ({ ...l, media: l.vendas ? l.pontos / l.vendas : null }))
+      .sort((a, b) => (b.media ?? -1) - (a.media ?? -1) || b.pontos - a.pontos || a.nome.localeCompare(b.nome, "pt-BR"));
+    const vendasEquipe = linhasRating.reduce((t, l) => t + l.vendas, 0);
+    const pontosEquipe = linhasRating.reduce((t, l) => t + l.pontos, 0);
+    const equipeRating = { vendas: vendasEquipe, pontos: pontosEquipe, media: vendasEquipe ? pontosEquipe / vendasEquipe : null };
 
     // 9) Meio do PRIMEIRO contato (informado no registro do lead), por atendimento do período
     const porMeio = new Map<MeioContato, number>(MEIOS_CONTATO.map((m) => [m, 0]));
@@ -370,7 +406,7 @@ export function DashboardView({
       faturamento,
       metaClientes,
       metaFat,
-      agendados,
+      conversao,
       visitas,
       fatMetaSerie,
       projecao,
@@ -380,12 +416,14 @@ export function DashboardView({
       contatosPorMeio,
       semMeio,
       funil,
+      funisOrigem,
+      linhasRating,
+      equipeRating,
       indicadores,
       porCampanha: porCampanhaList,
       negociosIndicados,
       indicadorOpcoes,
       cidades,
-      topCidades,
       semPonto,
     };
   }, [atendimentos, metas, vendedores, vendedoresSel, municipiosSel, ini, fim, campanhaNome, produtoInfo, coordenadas]);
@@ -581,11 +619,11 @@ export function DashboardView({
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <ChartCard
-          title="Origem de Leads"
-          subtitle="Atendimentos que chegaram a visita agendada, por mês de registro"
+          title="Evolução da taxa de conversão"
+          subtitle="Dos atendimentos registrados em cada mês, % que virou cliente (todas as origens)"
           className="xl:col-span-2"
         >
-          <AgendadosPorCanalChart data={d.agendados} />
+          <ConversaoChart data={d.conversao} />
         </ChartCard>
         <ChartCard title="Visitas / reuniões efetivadas" subtitle="Quantidade por mês da visita">
           <VisitasChart data={d.visitas} />
@@ -600,9 +638,14 @@ export function DashboardView({
         >
           <ContatosPorMeioChart data={d.contatosPorMeio} />
         </ChartCard>
-        <ChartCard title="Funil de vendas" subtitle="Atendimentos registrados no período" className="xl:col-span-2">
+        <ChartCard title="Funil de vendas" subtitle="Geral: todos os atendimentos registrados no período" className="xl:col-span-2">
           <Funil data={d.funil} />
         </ChartCard>
+        {d.funisOrigem.map((f) => (
+          <ChartCard key={f.key} title={`Funil - ${f.titulo}`} subtitle={`Somente atendimentos com origem ${f.titulo}`}>
+            <Funil data={f.dados} />
+          </ChartCard>
+        ))}
         <ChartCard
           title="Faturamento mensal x meta"
           subtitle="Total faturado por mês de fechamento, comparado à meta"
@@ -616,6 +659,13 @@ export function DashboardView({
         <ChartCard title="Faturamento x meta por vendedor" subtitle="Faturado e meta de faturamento do período, por vendedor">
           <FaturamentoVendedorChart data={d.porVendedor} />
         </ChartCard>
+        <ChartCard
+          title="Pontuação e rating comercial"
+          subtitle="Média de pontos por venda de cada vendedor, conforme a origem dos clientes fechados"
+          className="xl:col-span-2"
+        >
+          <RatingComercial linhas={d.linhasRating} equipe={d.equipeRating} />
+        </ChartCard>
         <div className="grid grid-cols-1 gap-4 xl:col-span-2 xl:grid-cols-3">
           <ChartCard
             title="Mapa de negócios fechados"
@@ -624,8 +674,8 @@ export function DashboardView({
           >
             <MapaNegocios cidades={d.cidades} semLocalizacao={d.semPonto} />
           </ChartCard>
-          <ChartCard title="Top 5 cidades" subtitle="Cidades com mais negócios fechados no período">
-            <RankingCidades cidades={d.topCidades} />
+          <ChartCard title="Ranking de cidades" subtitle="Todas as cidades com negócio fechado no período">
+            <RankingCidades cidades={d.cidades} />
           </ChartCard>
         </div>
         <ChartCard title="Negócios por pessoa que indicou" subtitle="Atendimentos do canal Indicação registrados no período">

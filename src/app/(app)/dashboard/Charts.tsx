@@ -17,7 +17,7 @@ import {
   YAxis,
   type TooltipContentProps,
 } from "recharts";
-import { CANAIS, CANAL_COLOR, CHART_PRIMARY, CHART_REFERENCE } from "@/lib/constants";
+import { CHART_PRIMARY, CHART_REFERENCE } from "@/lib/constants";
 import { formatBRL, formatBRLCompact, formatNumber, formatPercent } from "@/lib/format";
 
 /** Ponto de uma série mensal: rótulo curto (eixo) + longo (tooltip) + valores. */
@@ -78,20 +78,67 @@ const tip = (fmt: Fmt) =>
     return <ChartTooltip {...(p as TooltipContentProps<number, string>)} fmt={fmt} />;
   };
 
-export function AgendadosPorCanalChart({ data }: { data: MesPonto[] }) {
+/** Evolução mensal da taxa de conversão geral: % dos atendimentos registrados no mês que viraram clientes. */
+export function ConversaoChart({ data }: { data: MesPonto[] }) {
+  const maximo = Math.max(1, ...data.map((d) => Number(d.taxa ?? 0)));
+  // eixo com marcas redondas (0, 5, 10... ou 0, 10, 20...)
+  const passo = maximo <= 10 ? 2 : maximo <= 25 ? 5 : maximo <= 50 ? 10 : 20;
+  const teto = Math.min(100, Math.ceil((maximo * 1.15) / passo) * passo);
+  const marcas = Array.from({ length: Math.floor(teto / passo) + 1 }, (_, i) => i * passo);
+  const semDados = data.every((d) => d.taxa === null);
+  if (semDados) {
+    return <div className="flex h-[260px] items-center justify-center text-sm text-fg-3">Nenhum atendimento registrado no período.</div>;
+  }
   return (
-    <div style={{ height: HEIGHT + 30 }} role="img" aria-label="Gráfico de barras: origem dos leads (visitas agendadas por mês e canal de prospecção)">
+    <div style={{ height: HEIGHT + 30 }} role="img" aria-label="Gráfico de linha: evolução mensal da taxa de conversão de atendimentos em clientes">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} margin={{ top: 8, right: 8, left: -12, bottom: 0 }} barCategoryGap="18%" barGap={2}>
+        <LineChart data={data} margin={{ top: 16, right: 16, left: -4, bottom: 0 }}>
           <CartesianGrid vertical={false} stroke={GRID} />
           <XAxis dataKey="label" tick={AXIS} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-          <YAxis allowDecimals={false} tick={AXIS} axisLine={false} tickLine={false} width={40} />
-          <Tooltip cursor={{ fill: "#f3f4f6" }} content={tip(formatNumber)} />
-          <Legend content={() => <LegendContent items={CANAIS.map((c) => ({ label: c, color: CANAL_COLOR[c] }))} />} />
-          {CANAIS.map((c) => (
-            <Bar key={c} dataKey={c} name={c} fill={CANAL_COLOR[c]} radius={[4, 4, 0, 0]} maxBarSize={18} />
-          ))}
-        </BarChart>
+          <YAxis domain={[0, teto]} ticks={marcas} tickFormatter={(v) => `${v}%`} tick={AXIS} axisLine={false} tickLine={false} width={48} />
+          <Tooltip
+            cursor={{ stroke: "#d1d5db", strokeDasharray: "3 3" }}
+            content={(p) => {
+              const { active, payload } = p as unknown as TooltipContentProps<number, string>;
+              const ponto = payload?.[0]?.payload as MesPonto | undefined;
+              if (!active || !ponto) return null;
+              return (
+                <div className="min-w-44 rounded-md border border-line bg-surface px-3 py-2 text-xs shadow-pop">
+                  <p className="mb-1.5 font-semibold text-fg">{ponto.labelLongo}</p>
+                  <p className="flex justify-between gap-4 text-fg-2">
+                    Taxa de conversão
+                    <span className="font-semibold text-fg tabular-nums">
+                      {ponto.taxa === null ? "—" : formatPercent(Number(ponto.taxa) / 100)}
+                    </span>
+                  </p>
+                  <p className="flex justify-between gap-4 text-fg-2">
+                    Atendimentos <span className="font-medium text-fg tabular-nums">{formatNumber(Number(ponto.atendimentos))}</span>
+                  </p>
+                  <p className="flex justify-between gap-4 text-fg-2">
+                    Viraram clientes <span className="font-medium text-fg tabular-nums">{formatNumber(Number(ponto.fechados))}</span>
+                  </p>
+                </div>
+              );
+            }}
+          />
+          <Line
+            type="monotone"
+            dataKey="taxa"
+            name="Taxa de conversão"
+            stroke={CHART_PRIMARY}
+            strokeWidth={2}
+            dot={{ r: 4, fill: CHART_PRIMARY, stroke: "#fff", strokeWidth: 2 }}
+            activeDot={{ r: 5, stroke: "#fff", strokeWidth: 2 }}
+            connectNulls
+            isAnimationActive={false}
+            label={{
+              position: "top",
+              fontSize: 11,
+              fill: "#6b7280",
+              formatter: (v: unknown) => (v === null || v === undefined ? "" : `${Number(v).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`),
+            }}
+          />
+        </LineChart>
       </ResponsiveContainer>
     </div>
   );
