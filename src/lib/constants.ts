@@ -134,21 +134,22 @@ export const CANAL_COLOR: Record<Canal, string> = {
 };
 
 /**
- * Origens analíticas (funis) e pontuação de venda. Orgânico = lead que chegou sozinho:
+ * Origens analíticas (funis) e pontuação de venda. Orgânico = lead que chegou sozinho (Captação Receptiva).
+ * "Outros" não pertence a nenhuma origem por enquanto (será classificado depois): não entra nos funis nem pontua.
  * Captação Receptiva e, por enquanto, Outros.
  */
 export const ORIGENS = [
   { key: "redes_sociais", label: "Redes Sociais", pontos: 6, canais: ["Redes Sociais"] },
   { key: "captacao_ativa", label: "Captação Ativa", pontos: 10, canais: ["Captação Ativa"] },
   { key: "indicacao", label: "Indicação", pontos: 4, canais: ["Indicação"] },
-  { key: "organico", label: "Orgânico", pontos: 3, canais: ["Captação Receptiva", "Outros"] },
+  { key: "organico", label: "Orgânico", pontos: 3, canais: ["Captação Receptiva"] },
 ] as const satisfies readonly { key: string; label: string; pontos: number; canais: readonly Canal[] }[];
 
 export type OrigemKey = (typeof ORIGENS)[number]["key"];
 
-/** Origem analítica de um canal (canal desconhecido conta como Orgânico). */
-export function origemDoCanal(canal: string): (typeof ORIGENS)[number] {
-  return ORIGENS.find((o) => (o.canais as readonly string[]).includes(canal)) ?? ORIGENS[3];
+/** Origem analítica de um canal (null = sem origem analítica, como "Outros"). */
+export function origemDoCanal(canal: string): (typeof ORIGENS)[number] | null {
+  return ORIGENS.find((o) => (o.canais as readonly string[]).includes(canal)) ?? null;
 }
 
 /** Rating comercial: média de pontos por venda. */

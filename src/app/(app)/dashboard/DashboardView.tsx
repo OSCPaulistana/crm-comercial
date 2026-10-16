@@ -250,7 +250,7 @@ export function DashboardView({
     const funisOrigem = ORIGENS.map((o) => ({
       key: o.key,
       titulo: o.label,
-      dados: funilDe(registrados.filter((a) => origemDoCanal(a.canal).key === o.key)),
+      dados: funilDe(registrados.filter((a) => origemDoCanal(a.canal)?.key === o.key)),
     }));
 
     // 5) e 6) Negócios por pessoa que indicou / por campanha — por situação atual
@@ -367,7 +367,7 @@ export function DashboardView({
     const linhaRating = (id: string, nome: string) => {
       let l = ratingMap.get(id);
       if (!l) {
-        l = { id, nome, vendas: 0, pontos: 0, media: null, porOrigem: zeros() };
+        l = { id, nome, vendas: 0, semPontuacao: 0, pontos: 0, media: null, porOrigem: zeros() };
         ratingMap.set(id, l);
       }
       return l;
@@ -376,6 +376,11 @@ export function DashboardView({
     for (const a of efetivados) {
       const l = linhaRating(a.responsavel_id ?? "__sem__", a.responsavel_id ? vendNomeRating.get(a.responsavel_id) ?? "—" : "Sem responsável");
       const o = origemDoCanal(a.canal);
+      if (!o) {
+        // origem "Outros": não pontua e fica fora da média
+        l.semPontuacao += 1;
+        continue;
+      }
       l.vendas += 1;
       l.pontos += o.pontos;
       l.porOrigem[o.key] += 1;
@@ -385,7 +390,12 @@ export function DashboardView({
       .sort((a, b) => (b.media ?? -1) - (a.media ?? -1) || b.pontos - a.pontos || a.nome.localeCompare(b.nome, "pt-BR"));
     const vendasEquipe = linhasRating.reduce((t, l) => t + l.vendas, 0);
     const pontosEquipe = linhasRating.reduce((t, l) => t + l.pontos, 0);
-    const equipeRating = { vendas: vendasEquipe, pontos: pontosEquipe, media: vendasEquipe ? pontosEquipe / vendasEquipe : null };
+    const equipeRating = {
+      vendas: vendasEquipe,
+      semPontuacao: linhasRating.reduce((t, l) => t + l.semPontuacao, 0),
+      pontos: pontosEquipe,
+      media: vendasEquipe ? pontosEquipe / vendasEquipe : null,
+    };
 
     // 9) Meio do PRIMEIRO contato (informado no registro do lead), por atendimento do período
     const porMeio = new Map<MeioContato, number>(MEIOS_CONTATO.map((m) => [m, 0]));

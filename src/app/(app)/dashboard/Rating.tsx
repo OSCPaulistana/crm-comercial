@@ -6,7 +6,10 @@ import { formatNumber } from "@/lib/format";
 export interface LinhaRating {
   id: string;
   nome: string;
+  /** Vendas pontuadas (entram na média). */
   vendas: number;
+  /** Vendas de origem "Outros": ainda sem pontuação, ficam fora da média. */
+  semPontuacao: number;
   pontos: number;
   /** Média de pontos por venda (null = sem vendas no período). */
   media: number | null;
@@ -70,7 +73,7 @@ export function RatingComercial({ linhas, equipe }: { linhas: LinhaRating[]; equ
         <div className="flex h-[120px] items-center justify-center text-sm text-fg-3">Nenhum vendedor para avaliar no período.</div>
       ) : (
         <div className="overflow-x-auto rounded-md border border-line">
-          <table className="w-full min-w-[720px] border-collapse text-sm">
+          <table className="w-full min-w-[800px] border-collapse text-sm">
             <thead>
               <tr className="bg-gray-50/80 text-[11px] font-semibold tracking-wide text-fg-2 uppercase">
                 <th scope="col" className="px-3 py-2.5 text-left">Vendedor</th>
@@ -80,6 +83,7 @@ export function RatingComercial({ linhas, equipe }: { linhas: LinhaRating[]; equ
                     {o.label}
                   </th>
                 ))}
+                <th scope="col" className="px-2 py-2.5 text-right" title="Vendas de origem Outros: não pontuam">Outros (s/ pontos)</th>
                 <th scope="col" className="px-2 py-2.5 text-right">Pontos</th>
                 <th scope="col" className="px-2 py-2.5 text-right">Média / venda</th>
                 <th scope="col" className="px-3 py-2.5 text-center">Rating</th>
@@ -95,6 +99,7 @@ export function RatingComercial({ linhas, equipe }: { linhas: LinhaRating[]; equ
                       {l.porOrigem[o.key] || "—"}
                     </td>
                   ))}
+                  <td className="px-2 py-2.5 text-right text-fg-2 tabular-nums">{l.semPontuacao || "—"}</td>
                   <td className="px-2 py-2.5 text-right tabular-nums">{formatNumber(l.pontos)}</td>
                   <td className="px-2 py-2.5 text-right font-semibold tabular-nums">{l.media === null ? "—" : decimal(l.media)}</td>
                   <td className="px-3 py-2 text-center">
@@ -112,6 +117,7 @@ export function RatingComercial({ linhas, equipe }: { linhas: LinhaRating[]; equ
                     {linhas.reduce((s, l) => s + l.porOrigem[o.key], 0) || "—"}
                   </td>
                 ))}
+                <td className="px-2 py-2.5 text-right text-fg-2 tabular-nums">{equipe.semPontuacao || "—"}</td>
                 <td className="px-2 py-2.5 text-right tabular-nums">{formatNumber(equipe.pontos)}</td>
                 <td className="px-2 py-2.5 text-right font-semibold tabular-nums">{equipe.media === null ? "—" : decimal(equipe.media)}</td>
                 <td className="px-3 py-2 text-center">
@@ -123,7 +129,8 @@ export function RatingComercial({ linhas, equipe }: { linhas: LinhaRating[]; equ
         </div>
       )}
       <p className="mt-2 text-xs text-fg-3">
-        Considera as vendas fechadas no período e nos filtros selecionados. Orgânico = Captação Receptiva e Outros.
+        Considera as vendas fechadas no período e nos filtros selecionados. Orgânico = Captação Receptiva. Vendas de origem &quot;Outros&quot; ainda não
+        pontuam (serão classificadas) e ficam fora da média.
       </p>
     </div>
   );
