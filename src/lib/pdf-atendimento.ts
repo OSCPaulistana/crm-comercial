@@ -331,7 +331,7 @@ export async function gerarPdfAtendimento(d: DadosPdfAtendimento) {
       : []),
     { rotulo: "LinkedIn", valor: a.qualif_linkedin ?? "" },
     { rotulo: "Instagram", valor: a.qualif_instagram ?? "" },
-    { rotulo: "Facebook", valor: a.qualif_facebook ?? "" },
+    { rotulo: "Site", valor: a.qualif_site ?? "" },
   ]);
   if (pendencias.length && !a.importado) paragrafo(`Checklist incompleto - falta informar: ${pendencias.join(", ")}.`, M, W, 8.5, COR.aviso, true);
 

@@ -114,7 +114,7 @@ export interface Atendimento {
   qualif_produtos: string[];
   qualif_linkedin: string | null;
   qualif_instagram: string | null;
-  qualif_facebook: string | null;
+  qualif_site: string | null;
   /** Restaurante: pede o sistema da frente de caixa e o ERP financeiro. */
   qualif_restaurante: boolean | null;
   qualif_pdv_sistema: string | null;

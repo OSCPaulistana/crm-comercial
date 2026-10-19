@@ -102,7 +102,7 @@ export function EtapaDetalhe({
         )}
         <Info label="LinkedIn">{a.qualif_linkedin}</Info>
         <Info label="Instagram">{a.qualif_instagram}</Info>
-        <Info label="Facebook">{a.qualif_facebook}</Info>
+        <Info label="Site">{a.qualif_site}</Info>
       </>
     ),
     agendado_visita: <Info label="Reunião agendada para">{a.data_visita ? formatDate(a.data_visita) : ""}</Info>,

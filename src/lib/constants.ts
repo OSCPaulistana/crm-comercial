@@ -103,7 +103,7 @@ export const MESES_LONGOS = [
 export const MEIOS_CONTATO = ["WhatsApp", "Ligação", "E-mail", "Presencial"] as const;
 export type MeioContato = (typeof MEIOS_CONTATO)[number];
 
-export const TIPOS_VISITA = ["Visita", "Reunião no escritório"] as const;
+export const TIPOS_VISITA = ["Visita", "Reunião no escritório", "Videoconferência"] as const;
 export type TipoVisita = (typeof TIPOS_VISITA)[number];
 
 export const GIRO_ETAPAS = [1, 2, 3, 4] as const;

@@ -1063,7 +1063,7 @@ function AtendimentoFormInner({
 
         {visita && (
           <Field label="O que foi realizado" required error={errors.tipo_visita}>
-            <div role="radiogroup" aria-label="Tipo" className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <div role="radiogroup" aria-label="Tipo" className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               {TIPOS_VISITA.map((t) => {
                 const sel = f.tipo_visita === t;
                 return (

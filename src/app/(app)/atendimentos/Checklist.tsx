@@ -20,7 +20,7 @@ export interface ChecklistValores {
   /** Redes sociais (opcionais). */
   q_linkedin: string;
   q_instagram: string;
-  q_facebook: string;
+  q_site: string;
   /** Restaurante: abre as perguntas sobre o sistema de frente de caixa e o ERP financeiro. */
   q_restaurante: "" | "sim" | "nao";
   q_pdv: string;
@@ -40,7 +40,7 @@ export const CHECKLIST_VAZIO: ChecklistValores = {
   q_produtos: [],
   q_linkedin: "",
   q_instagram: "",
-  q_facebook: "",
+  q_site: "",
   q_restaurante: "",
   q_pdv: "",
   q_erp: "",
@@ -68,7 +68,7 @@ export function checklistDe(a: Atendimento | null): ChecklistValores {
     q_produtos: a.qualif_produtos ?? [],
     q_linkedin: a.qualif_linkedin ?? "",
     q_instagram: a.qualif_instagram ?? "",
-    q_facebook: a.qualif_facebook ?? "",
+    q_site: a.qualif_site ?? "",
     q_restaurante: a.qualif_restaurante === true ? "sim" : a.qualif_restaurante === false ? "nao" : "",
     q_pdv: a.qualif_pdv_sistema ?? "",
     q_erp: a.qualif_erp_financeiro ?? "",
@@ -107,7 +107,7 @@ const MSG: Record<keyof ChecklistValores, string> = {
   q_produtos: "Selecione ao menos um produto/serviço.",
   q_linkedin: "", // opcionais: nunca são pendência
   q_instagram: "",
-  q_facebook: "",
+  q_site: "",
   q_restaurante: "",
   q_pdv: "Informe o sistema da frente de caixa (PDV).",
   q_erp: "Informe o ERP financeiro.",
@@ -132,7 +132,7 @@ export function checklistParaBanco(v: ChecklistValores) {
     qualif_produtos: v.q_produtos,
     qualif_linkedin: v.q_linkedin.trim() || null,
     qualif_instagram: v.q_instagram.trim() || null,
-    qualif_facebook: v.q_facebook.trim() || null,
+    qualif_site: v.q_site.trim() || null,
     qualif_restaurante: v.q_restaurante === "" ? null : v.q_restaurante === "sim",
     // sistemas só valem para restaurante
     qualif_pdv_sistema: v.q_restaurante === "sim" ? v.q_pdv.trim() || null : null,
@@ -323,11 +323,11 @@ export function Checklist({
             autoComplete="off"
           />
           <Input
-            label="Facebook"
-            value={valores.q_facebook}
-            onChange={(e) => onChange({ q_facebook: e.target.value })}
+            label="Site"
+            value={valores.q_site}
+            onChange={(e) => onChange({ q_site: e.target.value })}
             maxLength={200}
-            placeholder="facebook.com/..."
+            placeholder="www.suaempresa.com.br"
             autoComplete="off"
           />
         </fieldset>

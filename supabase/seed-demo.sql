@@ -63,7 +63,7 @@ begin
       v_vend,
       case when v_status in ('agendado_visita','visita_realizada','proposta_enviada','negocio_efetivado')
            then least(v_data + 7, current_date) end,
-      case when v_status = 'visita_realizada' then (array['Visita','Reunião no escritório'])[1 + floor(random() * 2)::int] end,
+      case when v_status = 'visita_realizada' then (array['Visita','Reunião no escritório','Videoconferência'])[1 + floor(random() * 3)::int] end,
       -- checklist de qualificação (obrigatório a partir de "Agendado Visita")
       'Atividade demonstrativa',
       random() < 0.3,
